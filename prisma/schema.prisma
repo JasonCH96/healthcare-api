@@ -17,8 +17,71 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   password  String
-  role      Role    @default(PATIENT)
+  role      Role     @default(PATIENT)
+  isActive  Boolean  @default(true)
+
+  // Campos de seguridad
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+  passwordChangedAt   DateTime?
+  mfaEnabled          Boolean   @default(false)
+  mfaSecret           String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relaciones
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  tokenHash   String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenFamily String
+  version     Int      @default(1)
+  expiresAt   DateTime
+  isRevoked   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  ipAddress   String?
+  userAgent   String?
+
+  @@index([userId])
+  @@index([tokenFamily])
+  @@map("refresh_tokens")
+}
+
+model LoginAttempt {
+  id        String   @id @default(uuid())
+  email     String
+  ipAddress String
+  success   Boolean
+  attemptAt DateTime @default(now())
+
+  @@index([email, attemptAt])
+  @@index([ipAddress, attemptAt])
+  @@map("login_attempts")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String // e.g., LOGIN_SUCCESS, LOGIN_FAILURE, LOGOUT, PASSWORD_RESET
+  resource  String?
+  ipAddress String
+  userAgent String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
 }
 
