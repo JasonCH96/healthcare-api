@@ -1,33 +1,38 @@
-# Healthcare API 🏥
+# Healthcare API
 
-Backend API para la gestión de un sistema de salud, construido con **NestJS**, **Prisma** y **PostgreSQL**, siguiendo buenas prácticas de arquitectura modular y escalable.
+Backend API for a healthcare management system built with **NestJS**, **Prisma**, and **PostgreSQL**, designed following clean architecture and scalable SaaS principles.
 
----
-
-## 🛠️ Stack Tecnológico
-
-- **Node.js**
-- **NestJS**
-- **Prisma ORM**
-- **PostgreSQL**
-- **Docker & Docker Compose**
-- **TypeScript**
+This project serves as the foundation for managing users, authentication, roles, and future healthcare-related features such as appointments, doctors, and patients.
 
 ---
 
-## 📁 Estructura del Proyecto
+##  Tech Stack
 
-```text
-healthcare-api/
-├── prisma/
-│   ├── migrations/
-│   └── schema.prisma
-├── src/
-│   ├── modules/
-│   ├── common/
-│   ├── config/
-│   ├── app.module.ts
-│   └── main.ts
-├── docker-compose.yml
-├── Dockerfile
-└── README.md
+- **NestJS** – Backend framework
+- **PostgreSQL** – Relational database
+- **Prisma ORM** – Database access and migrations
+- **JWT** – Authentication
+- **Docker & Docker Compose** – Containerized development environment
+- **bcrypt** – Password hashing
+
+---
+
+## Project Status
+
+✅ Dockerized environment  
+✅ Database connected and running  
+✅ Prisma configured with migrations  
+✅ Users module implemented  
+✅ Authentication (Register / Login) with JWT  
+✅ Role-based user model (ADMIN, DOCTOR, PATIENT)
+
+---
+
+## Current Architecture
+
+```txt
+src/
+├── auth/        # Authentication & JWT logic
+├── users/       # User management
+├── prisma/      # Prisma client and database access
+└── main.ts
