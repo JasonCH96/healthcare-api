@@ -2,17 +2,12 @@ version: "3.9"
 
 services:
   api:
+    build: .
     container_name: healthcare-api
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
     env_file:
       - .env
-    volumes:
-      - .:/app
-      - /app/node_modules
+    ports:
+      - "3000:3000"
     depends_on:
       - db
     command: npm run start:dev
