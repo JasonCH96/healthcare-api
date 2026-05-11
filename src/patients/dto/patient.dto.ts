@@ -4,8 +4,12 @@ import {
   IsOptional,
   IsEnum,
   IsDateString,
-  IsJSON,
+  IsObject,
+  IsInt,
+  Min,
+  Max,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { Gender } from '@prisma/client';
 
 export class CreatePatientDto {
@@ -32,7 +36,8 @@ export class CreatePatientDto {
   whatsapp_phone?: string;
 
   @IsOptional()
-  emergency_contact?: any;
+  @IsObject()
+  emergency_contact?: Record<string, unknown>;
 }
 
 export class UpdatePatientDto {
@@ -49,7 +54,8 @@ export class UpdatePatientDto {
   whatsapp_phone?: string;
 
   @IsOptional()
-  emergency_contact?: any;
+  @IsObject()
+  emergency_contact?: Record<string, unknown>;
 }
 
 export class PatientQueryDto {
@@ -58,8 +64,15 @@ export class PatientQueryDto {
   search?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
   limit?: number;
 }

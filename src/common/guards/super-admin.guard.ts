@@ -4,29 +4,26 @@ import {
   ExecutionContext,
   ForbiddenException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service.js';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class SuperAdminGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly configService: ConfigService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    if (!user) {
+    if (!user?.email) {
       throw new ForbiddenException();
     }
 
-    const adminMembership = await this.prisma.clinicMembership.findFirst({
-      where: {
-        user_id: user.id,
-        role: 'ADMIN',
-        is_active: true,
-        deletedAt: null,
-      },
-    });
+    const superAdminEmails = this.configService
+      .get<string>('SUPER_ADMIN_EMAILS', '')
+      .split(',')
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean);
 
-    if (!adminMembership) {
+    if (!superAdminEmails.includes(user.email.toLowerCase())) {
       throw new ForbiddenException('SuperAdmin access required');
     }
 

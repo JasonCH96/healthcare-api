@@ -43,7 +43,7 @@ export class BillingController {
   }
 
   @Post('invoices/:id/send-to-hacienda')
-  sendToHacienda(@Param('id') id: string) {
-    return this.billingService.createElectronicInvoice(id);
+  sendToHacienda(@TenantClinicId() clinicId: string, @Param('id') id: string) {
+    return this.billingService.createElectronicInvoice(clinicId, id);
   }
 }

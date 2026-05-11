@@ -1,8 +1,7 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsUUID } from 'class-validator';
 
 export class CreateTimeBlockDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID('4')
   doctor_id: string;
 
   @IsDateString()

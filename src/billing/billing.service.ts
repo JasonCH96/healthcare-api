@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -12,9 +12,9 @@ export class BillingService {
     private readonly httpService: HttpService,
   ) {}
 
-  async createElectronicInvoice(invoiceId: string) {
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id: invoiceId },
+  async createElectronicInvoice(clinicId: string, invoiceId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, clinic_id: clinicId, deletedAt: null },
       include: {
         clinic: true,
         patient: true,
@@ -23,6 +23,9 @@ export class BillingService {
 
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
+    }
+    if (!invoice.clinic.hacienda_api_key) {
+      throw new BadRequestException('Clinic Hacienda API key is not configured');
     }
 
     // Build Hacienda-compatible JSON payload
@@ -109,14 +112,23 @@ export class BillingService {
       service_description?: string;
     },
   ) {
-    return this.prisma.invoice.create({
-      data: {
-        clinic_id: clinicId,
-        patient_id: data.patient_id,
-        total_amount: data.total_amount,
-        service_description: data.service_description,
-      },
-    });
+    return this.prisma.patient
+      .findFirst({
+        where: { id: data.patient_id, clinic_id: clinicId, deletedAt: null },
+        select: { id: true },
+      })
+      .then((patient) => {
+        if (!patient) throw new NotFoundException('Patient not found');
+
+        return this.prisma.invoice.create({
+          data: {
+            clinic_id: clinicId,
+            patient_id: data.patient_id,
+            total_amount: data.total_amount,
+            service_description: data.service_description,
+          },
+        });
+      });
   }
 
   async update(

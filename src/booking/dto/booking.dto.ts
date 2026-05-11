@@ -1,18 +1,16 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsUUID, Matches } from 'class-validator';
 
 export class BookingQueryDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID('4')
   clinic_id: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID('4')
   service_id?: string;
 }
 
 export class AvailableSlotsQueryDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID('4')
   clinic_id: string;
 
   @IsOptional()
@@ -20,33 +18,28 @@ export class AvailableSlotsQueryDto {
   doctor_id?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID('4')
   service_id?: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
   date: string; // YYYY-MM-DD
 }
 
 export class CreateBookingDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID('4')
   clinic_id: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID('4')
   service_id: string;
 
   @IsString()
   @IsNotEmpty()
   doctor_id: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
   date: string; // YYYY-MM-DD
 
-  @IsString()
-  @IsNotEmpty()
+  @Matches(/^\d{2}:\d{2}$/)
   time: string; // HH:mm
 
   @IsString()

@@ -1,4 +1,9 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { fromZonedTime } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -59,27 +64,9 @@ export class AppointmentsService {
     const startTime = new Date(dto.start_time);
     const endTime = new Date(dto.end_time);
 
-    // Check for schedule overlap for the same doctor
-    const overlap = await this.prisma.appointment.findFirst({
-      where: {
-        doctor_id: dto.doctor_id,
-        clinic_id: clinicId,
-        deletedAt: null,
-        status: { not: AppointmentStatus.CANCELLED },
-        OR: [
-          {
-            start_time: { lt: endTime },
-            end_time: { gt: startTime },
-          },
-        ],
-      },
-    });
-
-    if (overlap) {
-      throw new ConflictException(
-        'The doctor already has an appointment at this time',
-      );
-    }
+    this.assertValidTimeRange(startTime, endTime);
+    await this.validateCreateRelations(clinicId, dto);
+    await this.assertNoDoctorOverlap(clinicId, dto.doctor_id, startTime, endTime);
 
     return this.prisma.appointment.create({
       data: {
@@ -124,6 +111,19 @@ export class AppointmentsService {
     if (dto.reason !== undefined) data.reason = dto.reason;
     if (dto.status) data.status = dto.status;
 
+    if (dto.start_time || dto.end_time) {
+      const startTime = data.start_time instanceof Date ? data.start_time : apt.start_time;
+      const endTime = data.end_time instanceof Date ? data.end_time : apt.end_time;
+      this.assertValidTimeRange(startTime, endTime);
+      await this.assertNoDoctorOverlap(
+        clinicId,
+        apt.doctor_id,
+        startTime,
+        endTime,
+        id,
+      );
+    }
+
     return this.prisma.appointment.update({
       where: { id },
       data,
@@ -144,5 +144,76 @@ export class AppointmentsService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  private assertValidTimeRange(startTime: Date, endTime: Date) {
+    if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) {
+      throw new BadRequestException('Invalid appointment time');
+    }
+    if (endTime <= startTime) {
+      throw new BadRequestException('Appointment end time must be after start time');
+    }
+  }
+
+  private async validateCreateRelations(
+    clinicId: string,
+    dto: CreateAppointmentDto,
+  ) {
+    const [patient, doctorMembership, service] = await Promise.all([
+      this.prisma.patient.findFirst({
+        where: { id: dto.patient_id, clinic_id: clinicId, deletedAt: null },
+        select: { id: true },
+      }),
+      this.prisma.clinicMembership.findFirst({
+        where: {
+          user_id: dto.doctor_id,
+          clinic_id: clinicId,
+          role: 'DOCTOR',
+          is_active: true,
+          deletedAt: null,
+        },
+        select: { id: true },
+      }),
+      dto.service_id
+        ? this.prisma.service.findFirst({
+            where: {
+              id: dto.service_id,
+              clinic_id: clinicId,
+              is_active: true,
+              deletedAt: null,
+            },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (!patient) throw new NotFoundException('Patient not found');
+    if (!doctorMembership) throw new NotFoundException('Doctor not found in this clinic');
+    if (dto.service_id && !service) throw new NotFoundException('Service not found');
+  }
+
+  private async assertNoDoctorOverlap(
+    clinicId: string,
+    doctorId: string,
+    startTime: Date,
+    endTime: Date,
+    excludeAppointmentId?: string,
+  ) {
+    const overlap = await this.prisma.appointment.findFirst({
+      where: {
+        doctor_id: doctorId,
+        clinic_id: clinicId,
+        deletedAt: null,
+        status: { not: AppointmentStatus.CANCELLED },
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
+        OR: [{ start_time: { lt: endTime }, end_time: { gt: startTime } }],
+      },
+    });
+
+    if (overlap) {
+      throw new ConflictException(
+        'The doctor already has an appointment at this time',
+      );
+    }
   }
 }

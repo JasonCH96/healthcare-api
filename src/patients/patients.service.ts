@@ -60,7 +60,14 @@ export class PatientsService {
     try {
       return await this.prisma.patient.create({
         data: {
-          ...dto,
+          first_name: dto.first_name,
+          last_name: dto.last_name,
+          identification: dto.identification,
+          gender: dto.gender,
+          whatsapp_phone: dto.whatsapp_phone,
+          emergency_contact: dto.emergency_contact as
+            | Prisma.InputJsonValue
+            | undefined,
           birth_date: new Date(dto.birth_date),
           clinic_id: clinicId,
         },
@@ -81,7 +88,14 @@ export class PatientsService {
   update(clinicId: string, id: string, dto: UpdatePatientDto) {
     return this.prisma.patient.update({
       where: { id, clinic_id: clinicId },
-      data: dto,
+      data: {
+        first_name: dto.first_name,
+        last_name: dto.last_name,
+        whatsapp_phone: dto.whatsapp_phone,
+        emergency_contact: dto.emergency_contact as
+          | Prisma.InputJsonValue
+          | undefined,
+      },
     });
   }
 }

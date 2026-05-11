@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMedicalRecordDto } from './dto/medical-record.dto.js';
 
@@ -41,14 +42,16 @@ export class MedicalRecordsService {
     });
   }
 
-  create(clinicId: string, dto: CreateMedicalRecordDto) {
+  async create(clinicId: string, dto: CreateMedicalRecordDto) {
+    await this.validateRelations(clinicId, dto);
+
     return this.prisma.medicalRecord.create({
       data: {
         clinic_id: clinicId,
         patient_id: dto.patient_id,
         doctor_id: dto.doctor_id,
         appointment_id: dto.appointment_id,
-        vitals: dto.vitals,
+        vitals: dto.vitals as Prisma.InputJsonValue | undefined,
         diagnosis: dto.diagnosis,
         treatment_plan: dto.treatment_plan,
         gynoRecord: dto.gynoRecord
@@ -78,9 +81,52 @@ export class MedicalRecordsService {
           : undefined,
       },
       include: {
+        doctor: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+        patient: {
+          select: { id: true, first_name: true, last_name: true },
+        },
         gynoRecord: true,
         dentalRecords: true,
       },
     });
+  }
+
+  private async validateRelations(clinicId: string, dto: CreateMedicalRecordDto) {
+    const [patient, doctorMembership, appointment] = await Promise.all([
+      this.prisma.patient.findFirst({
+        where: { id: dto.patient_id, clinic_id: clinicId, deletedAt: null },
+        select: { id: true },
+      }),
+      this.prisma.clinicMembership.findFirst({
+        where: {
+          user_id: dto.doctor_id,
+          clinic_id: clinicId,
+          role: 'DOCTOR',
+          is_active: true,
+          deletedAt: null,
+        },
+        select: { id: true },
+      }),
+      dto.appointment_id
+        ? this.prisma.appointment.findFirst({
+            where: {
+              id: dto.appointment_id,
+              clinic_id: clinicId,
+              patient_id: dto.patient_id,
+              doctor_id: dto.doctor_id,
+              deletedAt: null,
+            },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (!patient) throw new NotFoundException('Patient not found');
+    if (!doctorMembership) throw new NotFoundException('Doctor not found in this clinic');
+    if (dto.appointment_id && !appointment) {
+      throw new NotFoundException('Appointment not found for this patient and doctor');
+    }
   }
 }

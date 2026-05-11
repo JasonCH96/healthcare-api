@@ -7,6 +7,8 @@ import {
   IsDateString,
   ValidateNested,
   IsArray,
+  IsObject,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -50,20 +52,19 @@ export class CreateDentalRecordDto {
 }
 
 export class CreateMedicalRecordDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID('4')
   patient_id: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID('4')
   doctor_id: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID('4')
   appointment_id?: string;
 
   @IsOptional()
-  vitals?: any;
+  @IsObject()
+  vitals?: Record<string, unknown>;
 
   @IsOptional()
   @IsString()

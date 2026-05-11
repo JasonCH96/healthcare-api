@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateTimeBlockDto, TimeBlockQueryDto } from './dto/time-block.dto.js';
 
@@ -49,12 +49,33 @@ export class TimeBlocksService {
       throw new NotFoundException('Doctor not found in this clinic');
     }
 
+    const startTime = new Date(dto.start_time);
+    const endTime = new Date(dto.end_time);
+    if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) {
+      throw new BadRequestException('Invalid time block range');
+    }
+    if (endTime <= startTime) {
+      throw new BadRequestException('Time block end time must be after start time');
+    }
+
+    const overlap = await this.prisma.timeBlock.findFirst({
+      where: {
+        doctor_id: dto.doctor_id,
+        clinic_id: clinicId,
+        start_time: { lt: endTime },
+        end_time: { gt: startTime },
+      },
+    });
+    if (overlap) {
+      throw new ConflictException('Doctor already has a time block in this range');
+    }
+
     return this.prisma.timeBlock.create({
       data: {
         clinic_id: clinicId,
         doctor_id: dto.doctor_id,
-        start_time: new Date(dto.start_time),
-        end_time: new Date(dto.end_time),
+        start_time: startTime,
+        end_time: endTime,
         reason: dto.reason,
       },
       include: {
