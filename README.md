@@ -4,30 +4,34 @@ Backend API para la gestión de **CitaBox** – la plataforma SaaS de gestión c
 
 ---
 
-## 🛠️ Stack Tecnológico
+## Tech Stack
 
-- **Node.js**
-- **NestJS**
-- **Prisma ORM**
-- **PostgreSQL**
-- **Docker & Docker Compose**
-- **TypeScript**
+- **NestJS** – Backend framework
+- **PostgreSQL** – Relational database
+- **Prisma ORM** – Database access and migrations
+- **JWT** – Authentication
+- **Docker & Docker Compose** – Containerized development environment
+- **bcrypt** – Password hashing
 
 ---
 
-## 📁 Estructura del Proyecto
+## Project Status
 
-```text
-healthcare-api/
-├── prisma/
-│   ├── migrations/
-│   └── schema.prisma
-├── src/
-│   ├── modules/
-│   ├── common/
-│   ├── config/
-│   ├── app.module.ts
-│   └── main.ts
-├── docker-compose.yml
-├── Dockerfile
-└── README.md
+✅ Dockerized environment  
+✅ Database connected and running  
+✅ Prisma configured with migrations  
+✅ Users module implemented  
+✅ Authentication (Register / Login) with JWT  
+✅ Role-based user model (ADMIN, DOCTOR, PATIENT)
+
+---
+
+## Current Architecture
+
+```txt
+src/
+├── auth/        # Authentication & JWT logic
+├── users/       # User management
+├── prisma/      # Prisma client and database access
+└── main.ts
+```
