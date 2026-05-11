@@ -1,6 +1,6 @@
-# Healthcare API 🏥
+# CitaBox API 🏥
 
-Backend API para la gestión de un sistema de salud, construido con **NestJS**, **Prisma** y **PostgreSQL**, siguiendo buenas prácticas de arquitectura modular y escalable.
+Backend API para la gestión de **CitaBox** – la plataforma SaaS de gestión clínica. Construido con **NestJS**, **Prisma** y **PostgreSQL**, siguiendo buenas prácticas de arquitectura modular y escalable. Dominio principal: **citabox.app**.
 
 ---
 
