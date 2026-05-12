@@ -1,4 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateClinicDto, UpdateClinicDto } from './dto/clinic.dto.js';
 
@@ -19,8 +22,74 @@ export class ClinicsService {
     });
   }
 
-  create(dto: CreateClinicDto) {
-    return this.prisma.clinic.create({ data: dto });
+  async create(dto: CreateClinicDto) {
+    const { initial_admin, ...clinicDto } = dto;
+    const slug = clinicDto.slug ?? this.slugify(clinicDto.name);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const clinic = await tx.clinic.create({
+          data: {
+            ...clinicDto,
+            slug,
+            timezone: clinicDto.timezone ?? 'America/Costa_Rica',
+            booking_enabled: clinicDto.booking_enabled ?? true,
+          },
+        });
+
+        if (!initial_admin) {
+          return clinic;
+        }
+
+        const existingUser = await tx.user.findUnique({
+          where: { email: initial_admin.email },
+        });
+
+        const user = existingUser
+          ? existingUser
+          : await tx.user.create({
+              data: {
+                first_name: initial_admin.first_name,
+                last_name: initial_admin.last_name,
+                email: initial_admin.email,
+                password: await bcrypt.hash(
+                  initial_admin.password ?? this.temporaryPassword(),
+                  12,
+                ),
+              },
+            });
+
+        await tx.clinicMembership.upsert({
+          where: {
+            user_id_clinic_id: {
+              user_id: user.id,
+              clinic_id: clinic.id,
+            },
+          },
+          update: {
+            role: 'ADMIN',
+            is_active: true,
+            deletedAt: null,
+          },
+          create: {
+            user_id: user.id,
+            clinic_id: clinic.id,
+            role: 'ADMIN',
+            is_active: true,
+          },
+        });
+
+        return clinic;
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new BadRequestException('Clinic tax ID or slug already exists');
+      }
+      throw error;
+    }
   }
 
   update(id: string, dto: UpdateClinicDto) {
@@ -28,5 +97,20 @@ export class ClinicsService {
       where: { id },
       data: dto,
     });
+  }
+
+  private slugify(value: string) {
+    const slug = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80);
+    return slug || `clinic-${randomUUID().slice(0, 8)}`;
+  }
+
+  private temporaryPassword() {
+    return `Temp-${randomUUID()}`;
   }
 }

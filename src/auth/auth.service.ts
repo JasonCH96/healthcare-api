@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -17,7 +21,11 @@ export class AuthService {
       include: {
         memberships: {
           where: { is_active: true, deletedAt: null },
-          include: { clinic: { select: { id: true, name: true } } },
+          include: {
+            clinic: {
+              select: { id: true, name: true, slug: true, is_active: true },
+            },
+          },
         },
       },
     });
@@ -36,9 +44,12 @@ export class AuthService {
 
     return {
       access_token,
-      memberships: user.memberships.map((m) => ({
+      memberships: user.memberships
+        .filter((m) => m.clinic.is_active)
+        .map((m) => ({
         clinic_id: m.clinic_id,
         clinic_name: m.clinic.name,
+        clinic_slug: m.clinic.slug,
         role: m.role,
         specialty: m.specialty,
       })),
@@ -55,13 +66,17 @@ export class AuthService {
     return user;
   }
 
-  async getProfile(userId: string, clinicId: string) {
+  async getProfile(userId: string, clinicId?: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
         memberships: {
           where: { is_active: true, deletedAt: null },
-          include: { clinic: { select: { id: true, name: true } } },
+          include: {
+            clinic: {
+              select: { id: true, name: true, slug: true, is_active: true },
+            },
+          },
         },
       },
     });
@@ -70,9 +85,14 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    const activeMembership = user.memberships.find(
-      (m) => m.clinic_id === clinicId,
-    );
+    const memberships = user.memberships.filter((m) => m.clinic.is_active);
+    const activeMembership = clinicId
+      ? memberships.find((m) => m.clinic_id === clinicId)
+      : null;
+
+    if (clinicId && !activeMembership) {
+      throw new ForbiddenException('You do not have access to this clinic');
+    }
 
     return {
       id: user.id,
@@ -83,13 +103,15 @@ export class AuthService {
         ? {
             clinic_id: activeMembership.clinic_id,
             clinic_name: activeMembership.clinic.name,
+            clinic_slug: activeMembership.clinic.slug,
             role: activeMembership.role,
             specialty: activeMembership.specialty,
           }
         : null,
-      memberships: user.memberships.map((m) => ({
+      memberships: memberships.map((m) => ({
         clinic_id: m.clinic_id,
         clinic_name: m.clinic.name,
+        clinic_slug: m.clinic.slug,
         role: m.role,
         specialty: m.specialty,
       })),

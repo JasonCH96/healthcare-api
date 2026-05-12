@@ -9,24 +9,53 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log('Seeding database...');
 
-  // Create demo clinic
   const clinic = await prisma.clinic.upsert({
     where: { tax_id: '3-101-000000' },
-    update: {},
+    update: {
+      slug: 'clinica-demo',
+      address: 'San Jose, Costa Rica',
+      public_phone: '2200-0000',
+      public_email: 'info@clinica.cr',
+      booking_enabled: true,
+    },
     create: {
-      name: 'Clínica Demo',
+      name: 'Clinica Demo',
+      slug: 'clinica-demo',
       tax_id: '3-101-000000',
       phone: '2200-0000',
       email: 'info@clinica.cr',
+      address: 'San Jose, Costa Rica',
+      public_phone: '2200-0000',
+      public_email: 'info@clinica.cr',
       is_active: true,
     },
   });
 
-  console.log('Clinic:', clinic.name, clinic.id);
+  const secondClinic = await prisma.clinic.upsert({
+    where: { tax_id: '3-101-000001' },
+    update: {
+      slug: 'clinica-escazu',
+      address: 'Escazu, Costa Rica',
+      public_phone: '2210-0000',
+      public_email: 'info@escazu.cr',
+      booking_enabled: true,
+    },
+    create: {
+      name: 'Clinica Escazu',
+      slug: 'clinica-escazu',
+      tax_id: '3-101-000001',
+      phone: '2210-0000',
+      email: 'info@escazu.cr',
+      address: 'Escazu, Costa Rica',
+      public_phone: '2210-0000',
+      public_email: 'info@escazu.cr',
+      is_active: true,
+    },
+  });
+
+  console.log('Clinics:', clinic.name, clinic.id, secondClinic.name, secondClinic.id);
 
   const ROUNDS = 12;
-
-  // Create users
   const users = [
     {
       email: 'admin@clinica.cr',
@@ -38,7 +67,7 @@ async function main() {
     {
       email: 'staff@clinica.cr',
       password: 'staff123',
-      first_name: 'Recepcionist',
+      first_name: 'Receptionist',
       last_name: 'User',
       role: 'STAFF' as const,
     },
@@ -68,7 +97,12 @@ async function main() {
 
     await prisma.clinicMembership.upsert({
       where: { user_id_clinic_id: { user_id: user.id, clinic_id: clinic.id } },
-      update: {},
+      update: {
+        role: u.role,
+        specialty: u.specialty ?? null,
+        is_active: true,
+        deletedAt: null,
+      },
       create: {
         user_id: user.id,
         clinic_id: clinic.id,
@@ -77,6 +111,24 @@ async function main() {
         is_active: true,
       },
     });
+
+    if (u.role === 'ADMIN') {
+      await prisma.clinicMembership.upsert({
+        where: {
+          user_id_clinic_id: {
+            user_id: user.id,
+            clinic_id: secondClinic.id,
+          },
+        },
+        update: { is_active: true, deletedAt: null, role: 'ADMIN' },
+        create: {
+          user_id: user.id,
+          clinic_id: secondClinic.id,
+          role: 'ADMIN',
+          is_active: true,
+        },
+      });
+    }
 
     console.log(`Created user: ${u.email} (${u.role})`);
   }

@@ -1,8 +1,13 @@
 import { IsString, IsNotEmpty, IsOptional, IsUUID, Matches } from 'class-validator';
 
 export class BookingQueryDto {
+  @IsOptional()
   @IsUUID('4')
-  clinic_id: string;
+  clinic_id?: string;
+
+  @IsOptional()
+  @IsString()
+  clinic_slug?: string;
 
   @IsOptional()
   @IsUUID('4')
@@ -10,8 +15,13 @@ export class BookingQueryDto {
 }
 
 export class AvailableSlotsQueryDto {
+  @IsOptional()
   @IsUUID('4')
-  clinic_id: string;
+  clinic_id?: string;
+
+  @IsOptional()
+  @IsString()
+  clinic_slug?: string;
 
   @IsOptional()
   @IsString()
@@ -26,8 +36,13 @@ export class AvailableSlotsQueryDto {
 }
 
 export class CreateBookingDto {
+  @IsOptional()
   @IsUUID('4')
-  clinic_id: string;
+  clinic_id?: string;
+
+  @IsOptional()
+  @IsString()
+  clinic_slug?: string;
 
   @IsUUID('4')
   service_id: string;

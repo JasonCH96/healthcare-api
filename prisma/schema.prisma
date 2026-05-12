@@ -46,10 +46,17 @@ enum PaymentStatus {
 model Clinic {
   id               String    @id @default(uuid())
   name             String
+  slug             String    @unique
   tax_id           String    @unique
   phone            String?
   email            String?
+  address          String?
+  timezone         String    @default("America/Costa_Rica")
+  public_phone     String?
+  public_email     String?
   logo_path        String?
+  theme_color      String?
+  booking_enabled  Boolean   @default(true)
   hacienda_api_key String?
   is_active        Boolean   @default(true)
   createdAt        DateTime  @default(now())

@@ -12,7 +12,6 @@ import { AuthService } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
-import { TenantClinicId } from '../common/decorators/tenant-clinic-id.decorator.js';
 import { SkipTenant } from '../common/decorators/skip-tenant.decorator.js';
 
 @Controller('auth')
@@ -28,7 +27,10 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: any, @TenantClinicId() clinicId: string) {
+  @SkipTenant()
+  me(@CurrentUser() user: any, @Req() request: any) {
+    const clinicHeader = request.headers['x-clinic-id'];
+    const clinicId = Array.isArray(clinicHeader) ? clinicHeader[0] : clinicHeader;
     return this.authService.getProfile(user.id, clinicId);
   }
 }

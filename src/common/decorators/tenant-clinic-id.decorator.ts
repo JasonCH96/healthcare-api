@@ -1,5 +1,5 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { TENANT_CLINIC_ID } from '../interceptors/tenant.interceptor.js';
+import { TENANT_CLINIC_ID } from '../tenant/tenant.constants.js';
 
 export const TenantClinicId = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): string => {

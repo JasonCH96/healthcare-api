@@ -14,18 +14,23 @@ export class BookingController {
 
   @Get('services')
   getServices(@Query() query: BookingQueryDto) {
-    return this.bookingService.getServices(query.clinic_id);
+    return this.bookingService.getServices(query.clinic_id, query.clinic_slug);
   }
 
   @Get('doctors')
   getDoctors(@Query() query: BookingQueryDto) {
-    return this.bookingService.getDoctors(query.clinic_id, query.service_id);
+    return this.bookingService.getDoctors(
+      query.clinic_id,
+      query.clinic_slug,
+      query.service_id,
+    );
   }
 
   @Get('available-slots')
   getAvailableSlots(@Query() query: AvailableSlotsQueryDto) {
     return this.bookingService.getAvailableSlots(
       query.clinic_id,
+      query.clinic_slug,
       query.date,
       query.doctor_id,
       query.service_id,

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { TenantModule } from './common/tenant/tenant.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor.js';
 import { ClinicsModule } from './clinics/clinics.module.js';
@@ -18,11 +19,13 @@ import { BillingModule } from './billing/billing.module.js';
 import { BookingModule } from './booking/booking.module.js';
 import { ServicesModule } from './services/services.module.js';
 import { TimeBlocksModule } from './time-blocks/time-blocks.module.js';
+import { PublicModule } from './public/public.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    TenantModule,
     AuthModule,
     ClinicsModule,
     UsersModule,
@@ -38,6 +41,7 @@ import { TimeBlocksModule } from './time-blocks/time-blocks.module.js';
     BookingModule,
     ServicesModule,
     TimeBlocksModule,
+    PublicModule,
   ],
   providers: [
     {

@@ -19,16 +19,11 @@ const SLOT_DURATION_MINUTES = 30;
 export class BookingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getServices(clinicId: string) {
-    const clinic = await this.prisma.clinic.findUnique({
-      where: { id: clinicId, deletedAt: null },
-    });
-    if (!clinic) {
-      throw new NotFoundException('Clinic not found');
-    }
+  async getServices(clinicId?: string, clinicSlug?: string) {
+    const clinic = await this.resolvePublicClinic(clinicId, clinicSlug);
 
     return this.prisma.service.findMany({
-      where: { clinic_id: clinicId, is_active: true, deletedAt: null },
+      where: { clinic_id: clinic.id, is_active: true, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -40,20 +35,15 @@ export class BookingService {
     });
   }
 
-  async getDoctors(clinicId: string, serviceId?: string) {
-    const clinic = await this.prisma.clinic.findUnique({
-      where: { id: clinicId, deletedAt: null },
-    });
-    if (!clinic) {
-      throw new NotFoundException('Clinic not found');
-    }
+  async getDoctors(clinicId?: string, clinicSlug?: string, serviceId?: string) {
+    const clinic = await this.resolvePublicClinic(clinicId, clinicSlug);
 
     // If a service_id is provided, only return doctors mapped to that service
     if (serviceId) {
       const service = await this.prisma.service.findFirst({
         where: {
           id: serviceId,
-          clinic_id: clinicId,
+          clinic_id: clinic.id,
           is_active: true,
           deletedAt: null,
         },
@@ -75,7 +65,7 @@ export class BookingService {
       const doctorIds = service.doctors.map((sd) => sd.doctor.id);
       const memberships = await this.prisma.clinicMembership.findMany({
         where: {
-          clinic_id: clinicId,
+          clinic_id: clinic.id,
           user_id: { in: doctorIds },
           role: 'DOCTOR',
           is_active: true,
@@ -95,7 +85,7 @@ export class BookingService {
 
     const memberships = await this.prisma.clinicMembership.findMany({
       where: {
-        clinic_id: clinicId,
+        clinic_id: clinic.id,
         role: 'DOCTOR',
         is_active: true,
         deletedAt: null,
@@ -116,11 +106,15 @@ export class BookingService {
   }
 
   async getAvailableSlots(
-    clinicId: string,
+    clinicId: string | undefined,
+    clinicSlug: string | undefined,
     date: string,
     doctorId?: string,
     serviceId?: string,
   ) {
+    const clinic = await this.resolvePublicClinic(clinicId, clinicSlug);
+    const activeClinicId = clinic.id;
+
     // Validate the date is not in the past (America/Costa_Rica)
     const nowCR = toZonedTime(new Date(), CLINIC_TZ);
     const todayCR = `${nowCR.getFullYear()}-${String(nowCR.getMonth() + 1).padStart(2, '0')}-${String(nowCR.getDate()).padStart(2, '0')}`;
@@ -132,7 +126,7 @@ export class BookingService {
 
     // If a specific doctor was chosen, return slots for that doctor only
     if (!isAny) {
-      return this.getSlotsForSingleDoctor(clinicId, doctorId, date);
+      return this.getSlotsForSingleDoctor(activeClinicId, doctorId, date);
     }
 
     // "Any available" — merge slots across all doctors linked to the service
@@ -142,7 +136,7 @@ export class BookingService {
       const service = await this.prisma.service.findFirst({
         where: {
           id: serviceId,
-          clinic_id: clinicId,
+          clinic_id: activeClinicId,
           is_active: true,
           deletedAt: null,
         },
@@ -158,7 +152,7 @@ export class BookingService {
     if (doctorIds.length === 0) {
       const memberships = await this.prisma.clinicMembership.findMany({
         where: {
-          clinic_id: clinicId,
+          clinic_id: activeClinicId,
           role: 'DOCTOR',
           is_active: true,
           deletedAt: null,
@@ -180,7 +174,7 @@ export class BookingService {
       this.prisma.appointment.findMany({
         where: {
           doctor_id: { in: doctorIds },
-          clinic_id: clinicId,
+          clinic_id: activeClinicId,
           deletedAt: null,
           status: { not: 'CANCELLED' },
           start_time: { gte: dayStart, lte: dayEnd },
@@ -190,7 +184,7 @@ export class BookingService {
       this.prisma.timeBlock.findMany({
         where: {
           doctor_id: { in: doctorIds },
-          clinic_id: clinicId,
+          clinic_id: activeClinicId,
           start_time: { lt: dayEnd },
           end_time: { gt: dayStart },
         },
@@ -345,19 +339,13 @@ export class BookingService {
   }
 
   async createAppointment(dto: CreateBookingDto) {
-    // Validate clinic
-    const clinic = await this.prisma.clinic.findUnique({
-      where: { id: dto.clinic_id, deletedAt: null },
-    });
-    if (!clinic) {
-      throw new NotFoundException('Clinic not found');
-    }
+    const clinic = await this.resolvePublicClinic(dto.clinic_id, dto.clinic_slug);
 
     // Validate service
     const service = await this.prisma.service.findFirst({
       where: {
         id: dto.service_id,
-        clinic_id: dto.clinic_id,
+        clinic_id: clinic.id,
         is_active: true,
         deletedAt: null,
       },
@@ -370,7 +358,7 @@ export class BookingService {
     const membership = await this.prisma.clinicMembership.findFirst({
       where: {
         user_id: dto.doctor_id,
-        clinic_id: dto.clinic_id,
+        clinic_id: clinic.id,
         role: 'DOCTOR',
         is_active: true,
         deletedAt: null,
@@ -389,7 +377,7 @@ export class BookingService {
     const overlap = await this.prisma.appointment.findFirst({
       where: {
         doctor_id: dto.doctor_id,
-        clinic_id: dto.clinic_id,
+        clinic_id: clinic.id,
         deletedAt: null,
         status: { not: 'CANCELLED' },
         OR: [{ start_time: { lt: endTime }, end_time: { gt: startTime } }],
@@ -405,12 +393,12 @@ export class BookingService {
     const patient = await this.prisma.patient.upsert({
       where: {
         clinic_id_identification: {
-          clinic_id: dto.clinic_id,
+          clinic_id: clinic.id,
           identification: dto.identification,
         },
       },
       create: {
-        clinic_id: dto.clinic_id,
+        clinic_id: clinic.id,
         first_name: dto.first_name,
         last_name: dto.last_name,
         identification: dto.identification,
@@ -429,7 +417,7 @@ export class BookingService {
     // Create appointment
     const appointment = await this.prisma.appointment.create({
       data: {
-        clinic_id: dto.clinic_id,
+        clinic_id: clinic.id,
         patient_id: patient.id,
         doctor_id: dto.doctor_id,
         service_id: dto.service_id,
@@ -450,5 +438,29 @@ export class BookingService {
     });
 
     return appointment;
+  }
+
+  private async resolvePublicClinic(clinicId?: string, clinicSlug?: string) {
+    if (!clinicId && !clinicSlug) {
+      throw new BadRequestException('clinic_id or clinic_slug is required');
+    }
+
+    const clinic = await this.prisma.clinic.findFirst({
+      where: {
+        ...(clinicId ? { id: clinicId } : { slug: clinicSlug }),
+        is_active: true,
+        deletedAt: null,
+      },
+      select: { id: true, booking_enabled: true },
+    });
+
+    if (!clinic) {
+      throw new NotFoundException('Clinic not found');
+    }
+    if (!clinic.booking_enabled) {
+      throw new BadRequestException('Online booking is disabled for this clinic');
+    }
+
+    return clinic;
   }
 }
