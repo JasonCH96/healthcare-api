@@ -46,6 +46,10 @@ export class RolesGuard implements CanActivate {
     }
 
     const role = (membership as { role: Role }).role;
+    if (role === 'SUPER_ADMIN') {
+      return true;
+    }
+
     if (!requiredRoles.includes(role)) {
       throw new ForbiddenException('Insufficient role');
     }

@@ -9,7 +9,9 @@ yarn-error.log*
 .env
 
 # Prisma
-prisma/migrations/
+prisma/migrations/*
+!prisma/migrations/20260512000100_add_super_admin_role/
+!prisma/migrations/20260512000100_add_super_admin_role/migration.sql
 
 # Docker
 postgres_data/

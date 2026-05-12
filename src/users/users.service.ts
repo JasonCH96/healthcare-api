@@ -1,4 +1,8 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
@@ -33,6 +37,12 @@ export class UsersService {
   }
 
   async createOrLink(clinicId: string, dto: CreateUserDto) {
+    if (dto.role === 'SUPER_ADMIN') {
+      throw new BadRequestException(
+        'SUPER_ADMIN cannot be assigned from a clinic workspace',
+      );
+    }
+
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
