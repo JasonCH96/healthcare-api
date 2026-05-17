@@ -16,6 +16,8 @@ export class PublicService {
         id: true,
         name: true,
         slug: true,
+        clinic_type: true,
+        specialty_modules: true,
         phone: true,
         email: true,
         public_phone: true,

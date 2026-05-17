@@ -15,11 +15,12 @@ import { NotificationsModule } from './notifications/notifications.module.js';
 import { PatientPortalModule } from './patient-portal/patient-portal.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { PdfGeneratorModule } from './pdf-generator/pdf-generator.module.js';
-import { BillingModule } from './billing/billing.module.js';
 import { BookingModule } from './booking/booking.module.js';
 import { ServicesModule } from './services/services.module.js';
 import { TimeBlocksModule } from './time-blocks/time-blocks.module.js';
 import { PublicModule } from './public/public.module.js';
+import { BillingModule } from './billing/billing.module.js';
+import { EmailModule } from './email/email.module.js';
 
 @Module({
   imports: [
@@ -34,14 +35,15 @@ import { PublicModule } from './public/public.module.js';
     MedicalRecordsModule,
     AnalyticsModule,
     NotificationsModule,
+    EmailModule,
     PatientPortalModule,
     StorageModule,
     PdfGeneratorModule,
-    BillingModule,
     BookingModule,
     ServicesModule,
     TimeBlocksModule,
     PublicModule,
+    BillingModule,
   ],
   providers: [
     {

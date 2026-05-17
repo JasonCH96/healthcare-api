@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { TenantClinicId } from '../common/decorators/tenant-clinic-id.decorator.js';
 import { MedicalRecordsService } from './medical-records.service.js';
@@ -28,5 +36,18 @@ export class MedicalRecordsController {
   @Get('medical-records/:id')
   findOne(@TenantClinicId() clinicId: string, @Param('id') id: string) {
     return this.medicalRecordsService.findOne(clinicId, id);
+  }
+
+  @Get('medical-records/:id/pdf')
+  async downloadPdf(
+    @TenantClinicId() clinicId: string,
+    @Param('id') id: string,
+  ) {
+    const pdf = await this.medicalRecordsService.generatePdf(clinicId, id);
+
+    return new StreamableFile(pdf.buffer, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${pdf.filename}"`,
+    });
   }
 }

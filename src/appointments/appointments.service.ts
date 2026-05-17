@@ -4,10 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { fromZonedTime } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service.js';
-
-const CLINIC_TZ = 'America/Costa_Rica';
 import {
   CreateAppointmentDto,
   UpdateAppointmentStatusDto,
@@ -15,6 +12,7 @@ import {
   AppointmentQueryDto,
 } from './dto/appointment.dto.js';
 import { AppointmentStatus } from '@prisma/client';
+import { getClinicDayBounds } from '../common/utils/clinic-time.util.js';
 
 @Injectable()
 export class AppointmentsService {
@@ -29,17 +27,14 @@ export class AppointmentsService {
     if (query.date) {
       // Treat the date as a full day in Costa Rica time and convert to UTC boundaries.
       // e.g. 2026-03-16 CR → gte: 2026-03-16T06:00:00Z, lte: 2026-03-17T05:59:59.999Z
-      where.start_time = {
-        gte: fromZonedTime(`${query.date}T00:00:00`, CLINIC_TZ),
-        lte: fromZonedTime(`${query.date}T23:59:59.999`, CLINIC_TZ),
-      };
+      where.start_time = getClinicDayBounds(query.date);
     } else if (query.startDate || query.endDate) {
       where.start_time = {};
       if (query.startDate) {
-        where.start_time.gte = fromZonedTime(`${query.startDate}T00:00:00`, CLINIC_TZ);
+        where.start_time.gte = getClinicDayBounds(query.startDate).dayStart;
       }
       if (query.endDate) {
-        where.start_time.lte = fromZonedTime(`${query.endDate}T23:59:59.999`, CLINIC_TZ);
+        where.start_time.lte = getClinicDayBounds(query.endDate).dayEnd;
       }
     }
 
@@ -93,10 +88,28 @@ export class AppointmentsService {
   }
 
   updateStatus(clinicId: string, id: string, dto: UpdateAppointmentStatusDto) {
-    return this.prisma.appointment.update({
-      where: { id, clinic_id: clinicId },
-      data: { status: dto.status },
-    });
+    return this.prisma.appointment
+      .findFirstOrThrow({
+        where: { id, clinic_id: clinicId, deletedAt: null },
+        select: { id: true },
+      })
+      .then(({ id: appointmentId }) =>
+        this.prisma.appointment.update({
+          where: { id: appointmentId },
+          data: { status: dto.status },
+          include: {
+            patient: {
+              select: { id: true, first_name: true, last_name: true },
+            },
+            doctor: {
+              select: { id: true, first_name: true, last_name: true },
+            },
+            service: {
+              select: { id: true, name: true, duration_minutes: true, price: true },
+            },
+          },
+        }),
+      );
   }
 
   async update(clinicId: string, id: string, dto: UpdateAppointmentDto) {

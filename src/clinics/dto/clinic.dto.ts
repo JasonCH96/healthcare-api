@@ -7,8 +7,11 @@ import {
   MinLength,
   ValidateNested,
   Matches,
+  IsArray,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { CLINIC_TYPES, SPECIALTY_MODULES } from '../clinic-types.js';
 
 export class InitialAdminDto {
   @IsString()
@@ -31,6 +34,17 @@ export class InitialAdminDto {
 export class CreateClinicDto {
   @IsString()
   name: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(CLINIC_TYPES)
+  clinic_type?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @IsIn(SPECIALTY_MODULES, { each: true })
+  specialty_modules?: string[];
 
   @IsOptional()
   @IsString()
@@ -90,6 +104,17 @@ export class UpdateClinicDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(CLINIC_TYPES)
+  clinic_type?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @IsIn(SPECIALTY_MODULES, { each: true })
+  specialty_modules?: string[];
 
   @IsOptional()
   @IsString()

@@ -26,7 +26,7 @@ export class CreateAppointmentDto {
   reason?: string;
 
   @IsOptional()
-  @IsUUID('4')
+  @IsString()
   service_id?: string;
 }
 

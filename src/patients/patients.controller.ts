@@ -27,6 +27,14 @@ export class PatientsController {
     return this.patientsService.findAll(clinicId, query);
   }
 
+  @Get(':id/appointments')
+  findAppointments(
+    @TenantClinicId() clinicId: string,
+    @Param('id') id: string,
+  ) {
+    return this.patientsService.findAppointments(clinicId, id);
+  }
+
   @Get(':id')
   findOne(@TenantClinicId() clinicId: string, @Param('id') id: string) {
     return this.patientsService.findOne(clinicId, id);

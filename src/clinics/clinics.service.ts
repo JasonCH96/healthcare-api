@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateClinicDto, UpdateClinicDto } from './dto/clinic.dto.js';
+import { type SpecialtyModule } from './clinic-types.js';
 
 @Injectable()
 export class ClinicsService {
@@ -34,6 +35,10 @@ export class ClinicsService {
             slug,
             timezone: clinicDto.timezone ?? 'America/Costa_Rica',
             booking_enabled: clinicDto.booking_enabled ?? true,
+            clinic_type: clinicDto.clinic_type ?? 'GENERAL_MEDICINE',
+            specialty_modules:
+              clinicDto.specialty_modules ??
+              this.defaultSpecialtyModules(clinicDto.clinic_type),
           },
         });
 
@@ -112,5 +117,17 @@ export class ClinicsService {
 
   private temporaryPassword() {
     return `Temp-${randomUUID()}`;
+  }
+
+  private defaultSpecialtyModules(clinicType?: string) {
+    const modules = new Set<SpecialtyModule>([
+      'GENERAL_MEDICINE',
+      'PRESCRIPTIONS',
+    ]);
+
+    if (clinicType === 'DENTAL') modules.add('DENTAL');
+    if (clinicType === 'GYNECOLOGY') modules.add('GYNECOLOGY');
+
+    return [...modules];
   }
 }

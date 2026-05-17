@@ -8,6 +8,8 @@ interface PrescriptionData {
   date: string;
   diagnosis: string;
   treatment_plan: string;
+  medications?: Array<{ name: string; dosage: string; frequency: string }>;
+  additional_notes?: string;
   vitals?: Record<string, any>;
 }
 
@@ -25,12 +27,12 @@ export class PdfGeneratorService {
         <div class="max-w-2xl mx-auto">
           <div class="border-b-2 border-blue-600 pb-4 mb-6">
             <h1 class="text-2xl font-bold text-blue-600">${this.escapeHtml(data.clinic_name)}</h1>
-            <p class="text-gray-500 text-sm">Prescription / Medical Record</p>
+            <p class="text-gray-500 text-sm">Receta y expediente clínico</p>
           </div>
 
           <div class="grid grid-cols-2 gap-4 mb-6">
             <div>
-              <p class="text-sm text-gray-500">Patient</p>
+              <p class="text-sm text-gray-500">Paciente</p>
               <p class="font-semibold">${this.escapeHtml(data.patient_name)}</p>
             </div>
             <div>
@@ -38,7 +40,7 @@ export class PdfGeneratorService {
               <p class="font-semibold">${this.escapeHtml(data.doctor_name)}</p>
             </div>
             <div>
-              <p class="text-sm text-gray-500">Date</p>
+              <p class="text-sm text-gray-500">Fecha</p>
               <p class="font-semibold">${this.escapeHtml(data.date)}</p>
             </div>
           </div>
@@ -47,24 +49,55 @@ export class PdfGeneratorService {
             data.vitals
               ? `
           <div class="mb-6 bg-gray-50 p-4 rounded">
-            <h3 class="font-semibold text-gray-700 mb-2">Vitals</h3>
+            <h3 class="font-semibold text-gray-700 mb-2">Signos vitales</h3>
             <pre class="text-sm">${this.escapeHtml(JSON.stringify(data.vitals, null, 2))}</pre>
           </div>`
               : ''
           }
 
           <div class="mb-6">
-            <h3 class="font-semibold text-gray-700 mb-2">Diagnosis</h3>
+            <h3 class="font-semibold text-gray-700 mb-2">Diagnóstico</h3>
             <p class="text-gray-600">${this.escapeHtml(data.diagnosis)}</p>
           </div>
 
           <div class="mb-6">
-            <h3 class="font-semibold text-gray-700 mb-2">Treatment Plan</h3>
+            <h3 class="font-semibold text-gray-700 mb-2">Plan de tratamiento</h3>
             <p class="text-gray-600">${this.escapeHtml(data.treatment_plan)}</p>
           </div>
 
+          ${
+            data.medications?.length
+              ? `
+          <div class="mb-6">
+            <h3 class="font-semibold text-gray-700 mb-2">Medicamentos prescritos</h3>
+            <div class="space-y-3">
+              ${data.medications
+                .map(
+                  (medication) => `
+                <div class="rounded border border-gray-200 p-3">
+                  <p class="font-semibold text-gray-800">${this.escapeHtml(medication.name)}</p>
+                  <p class="text-sm text-gray-600">Dosis: ${this.escapeHtml(medication.dosage)}</p>
+                  <p class="text-sm text-gray-600">Frecuencia: ${this.escapeHtml(medication.frequency)}</p>
+                </div>`,
+                )
+                .join('')}
+            </div>
+          </div>`
+              : ''
+          }
+
+          ${
+            data.additional_notes
+              ? `
+          <div class="mb-6">
+            <h3 class="font-semibold text-gray-700 mb-2">Notas adicionales</h3>
+            <p class="text-gray-600">${this.escapeHtml(data.additional_notes)}</p>
+          </div>`
+              : ''
+          }
+
           <div class="mt-12 pt-4 border-t text-center text-xs text-gray-400">
-            <p>This document was generated electronically and is valid without signature.</p>
+            <p>Documento generado digitalmente por la clínica para uso clínico.</p>
           </div>
         </div>
       </body>

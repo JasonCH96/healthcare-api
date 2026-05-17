@@ -1,37 +1,35 @@
-# CitaBox API 🏥
+# CitaBox API
 
-Backend API para la gestión de **CitaBox** – la plataforma SaaS de gestión clínica. Construido con **NestJS**, **Prisma** y **PostgreSQL**, siguiendo buenas prácticas de arquitectura modular y escalable. Dominio principal: **citabox.app**.
+Backend API para **CitaBox**, la plataforma SaaS de gestión clínica. Construido con **NestJS**, **Prisma** y **PostgreSQL**.
 
----
+## Estado de v1
+
+- Alcance activo: agenda, pacientes, expediente clinico, portal del paciente y booking publico.
+- La facturacion electronica no forma parte de la primera version.
+- El codigo historico de billing puede seguir existiendo en el repositorio, pero no debe considerarse parte del runtime activo de v1.
 
 ## Tech Stack
 
-- **NestJS** – Backend framework
-- **PostgreSQL** – Relational database
-- **Prisma ORM** – Database access and migrations
-- **JWT** – Authentication
-- **Docker & Docker Compose** – Containerized development environment
-- **bcrypt** – Password hashing
+- **NestJS**
+- **PostgreSQL**
+- **Prisma ORM**
+- **JWT**
+- **Docker / Docker Compose**
+- **bcrypt**
 
----
+## Estado tecnico
 
-## Project Status
+- Entorno dockerizado
+- Base de datos conectada
+- Prisma configurado
+- Modulos de auth, clinics, users, patients, appointments, medical-records y booking activos
+- Billing removido del runtime principal de v1
 
-✅ Dockerized environment  
-✅ Database connected and running  
-✅ Prisma configured with migrations  
-✅ Users module implemented  
-✅ Authentication (Register / Login) with JWT  
-✅ Role-based user model (ADMIN, DOCTOR, PATIENT)
+## Nota
 
----
+Si necesitas limpiar mas el alcance historico, revisa:
 
-## Current Architecture
-
-```txt
-src/
-├── auth/        # Authentication & JWT logic
-├── users/       # User management
-├── prisma/      # Prisma client and database access
-└── main.ts
-```
+- `docs/PRD.md`
+- `docs/backend.md`
+- `docs/API_REFERENCE.md`
+- `src/billing/*`

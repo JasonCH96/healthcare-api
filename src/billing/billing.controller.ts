@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Param,
-  Body,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { TenantClinicId } from '../common/decorators/tenant-clinic-id.decorator.js';
 import { BillingService } from './billing.service.js';
@@ -40,10 +32,5 @@ export class BillingController {
     @Body() dto: UpdateInvoiceDto,
   ) {
     return this.billingService.update(clinicId, id, dto);
-  }
-
-  @Post('invoices/:id/send-to-hacienda')
-  sendToHacienda(@TenantClinicId() clinicId: string, @Param('id') id: string) {
-    return this.billingService.createElectronicInvoice(clinicId, id);
   }
 }

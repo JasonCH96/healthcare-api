@@ -78,19 +78,29 @@ export class PatientPortalService {
   }
 
   getPrescriptions(patientId: string, clinicId: string) {
-    return this.prisma.medicalRecord.findMany({
+    return this.prisma.prescription.findMany({
       where: {
-        patient_id: patientId,
-        clinic_id: clinicId,
         deletedAt: null,
+        medicalRecord: {
+          patient_id: patientId,
+          clinic_id: clinicId,
+          deletedAt: null,
+        },
       },
       select: {
         id: true,
-        diagnosis: true,
-        treatment_plan: true,
+        medications: true,
+        additional_notes: true,
+        pdf_url: true,
         createdAt: true,
-        doctor: {
-          select: { first_name: true, last_name: true },
+        medicalRecord: {
+          select: {
+            diagnosis: true,
+            treatment_plan: true,
+            doctor: {
+              select: { first_name: true, last_name: true },
+            },
+          },
         },
       },
       orderBy: { createdAt: 'desc' },

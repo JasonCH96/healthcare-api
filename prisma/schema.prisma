@@ -42,27 +42,36 @@ enum PaymentStatus {
   PARTIAL
 }
 
+enum PaymentMethod {
+  SINPE_MOVIL
+  TARJETA
+  EFECTIVO
+  TRANSFERENCIA
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model Clinic {
-  id               String    @id @default(uuid())
-  name             String
-  slug             String    @unique
-  tax_id           String    @unique
-  phone            String?
-  email            String?
-  address          String?
-  timezone         String    @default("America/Costa_Rica")
-  public_phone     String?
-  public_email     String?
-  logo_path        String?
-  theme_color      String?
-  booking_enabled  Boolean   @default(true)
-  hacienda_api_key String?
-  is_active        Boolean   @default(true)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  deletedAt        DateTime?
+  id                String    @id @default(uuid())
+  name              String
+  slug              String    @unique
+  clinic_type       String    @default("GENERAL_MEDICINE")
+  specialty_modules String[]  @default(["GENERAL_MEDICINE"])
+  tax_id            String    @unique
+  phone             String?
+  email             String?
+  address           String?
+  timezone          String    @default("America/Costa_Rica")
+  public_phone      String?
+  public_email      String?
+  logo_path         String?
+  theme_color       String?
+  booking_enabled   Boolean   @default(true)
+  hacienda_api_key  String?
+  is_active         Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   memberships    ClinicMembership[]
   patients       Patient[]
@@ -86,10 +95,10 @@ model User {
   deletedAt  DateTime?
 
   memberships    ClinicMembership[]
-  appointments   Appointment[]   @relation("DoctorAppointments")
-  medicalRecords MedicalRecord[] @relation("DoctorMedicalRecords")
+  appointments   Appointment[]      @relation("DoctorAppointments")
+  medicalRecords MedicalRecord[]    @relation("DoctorMedicalRecords")
   services       ServiceDoctor[]
-  timeBlocks     TimeBlock[]     @relation("DoctorTimeBlocks")
+  timeBlocks     TimeBlock[]        @relation("DoctorTimeBlocks")
 
   @@map("users")
 }
@@ -137,25 +146,26 @@ model Patient {
 }
 
 model Appointment {
-  id             String            @id @default(uuid())
-  clinic_id      String
-  patient_id     String
-  doctor_id      String
-  service_id     String?
-  start_time     DateTime
-  end_time       DateTime
-  status         AppointmentStatus @default(PENDING)
-  reason         String?
-  reminder_sent  Boolean           @default(false)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  deletedAt      DateTime?
+  id            String            @id @default(uuid())
+  clinic_id     String
+  patient_id    String
+  doctor_id     String
+  service_id    String?
+  start_time    DateTime
+  end_time      DateTime
+  status        AppointmentStatus @default(PENDING)
+  reason        String?
+  reminder_sent Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  deletedAt     DateTime?
 
   clinic         Clinic          @relation(fields: [clinic_id], references: [id])
   patient        Patient         @relation(fields: [patient_id], references: [id])
   doctor         User            @relation("DoctorAppointments", fields: [doctor_id], references: [id])
   service        Service?        @relation(fields: [service_id], references: [id])
   medicalRecords MedicalRecord[]
+  invoices       Invoice[]
 
   @@map("appointments")
 }
@@ -173,12 +183,13 @@ model MedicalRecord {
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
 
-  clinic        Clinic        @relation(fields: [clinic_id], references: [id])
-  patient       Patient       @relation(fields: [patient_id], references: [id])
-  doctor        User          @relation("DoctorMedicalRecords", fields: [doctor_id], references: [id])
-  appointment   Appointment?  @relation(fields: [appointment_id], references: [id])
+  clinic        Clinic         @relation(fields: [clinic_id], references: [id])
+  patient       Patient        @relation(fields: [patient_id], references: [id])
+  doctor        User           @relation("DoctorMedicalRecords", fields: [doctor_id], references: [id])
+  appointment   Appointment?   @relation(fields: [appointment_id], references: [id])
   gynoRecord    GynoRecord?
   dentalRecords DentalRecord[]
+  prescriptions Prescription[]
 
   @@map("medical_records")
 }
@@ -220,22 +231,44 @@ model Invoice {
   id                   String         @id @default(uuid())
   clinic_id            String
   patient_id           String
+  appointment_id       String?
   hacienda_consecutive String?
   numeric_key          String?        @unique
   total_amount         Decimal        @db.Decimal(10, 2)
   service_description  String?
   hacienda_status      HaciendaStatus @default(DRAFT)
   payment_status       PaymentStatus  @default(UNPAID)
+  payment_method       PaymentMethod?
+  payment_reference    String?
+  paid_amount          Decimal?       @db.Decimal(10, 2)
+  paid_at              DateTime?
+  notes                String?
   pdf_url              String?
   xml_url              String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
   deletedAt            DateTime?
 
-  clinic  Clinic  @relation(fields: [clinic_id], references: [id])
-  patient Patient @relation(fields: [patient_id], references: [id])
+  clinic      Clinic       @relation(fields: [clinic_id], references: [id])
+  patient     Patient      @relation(fields: [patient_id], references: [id])
+  appointment Appointment? @relation(fields: [appointment_id], references: [id])
 
   @@map("invoices")
+}
+
+model Prescription {
+  id                String    @id @default(uuid())
+  medical_record_id String
+  medications       Json
+  additional_notes  String?
+  pdf_url           String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  medicalRecord MedicalRecord @relation(fields: [medical_record_id], references: [id])
+
+  @@map("prescriptions")
 }
 
 model Service {
@@ -244,7 +277,7 @@ model Service {
   name             String
   description      String?
   duration_minutes Int
-  price            Int       // price in cents (CRC)
+  price            Int // price in cents (CRC)
   is_active        Boolean   @default(true)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

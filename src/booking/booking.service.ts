@@ -3,12 +3,17 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { fromZonedTime, toZonedTime } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateBookingDto } from './dto/booking.dto.js';
-
-/** IANA timezone for all clinics in this deployment */
-const CLINIC_TZ = 'America/Costa_Rica';
+import {
+  CLINIC_TZ,
+  getClinicDateKey,
+  getClinicDayBounds,
+  getClinicMinutes,
+  getClinicNow,
+  getClinicTimeKey,
+  getClinicUtcDateTime,
+} from '../common/utils/clinic-time.util.js';
 
 /** Business hours: 08:00–17:00, 30-minute slots */
 const BUSINESS_START_HOUR = 8;
@@ -116,8 +121,8 @@ export class BookingService {
     const activeClinicId = clinic.id;
 
     // Validate the date is not in the past (America/Costa_Rica)
-    const nowCR = toZonedTime(new Date(), CLINIC_TZ);
-    const todayCR = `${nowCR.getFullYear()}-${String(nowCR.getMonth() + 1).padStart(2, '0')}-${String(nowCR.getDate()).padStart(2, '0')}`;
+    const nowCR = getClinicNow();
+    const todayCR = getClinicDateKey(nowCR);
     if (date < todayCR) {
       throw new BadRequestException('Cannot query slots for a past date');
     }
@@ -167,8 +172,7 @@ export class BookingService {
     }
 
     // Build busy-slots per doctor in one query
-    const dayStart = new Date(date + 'T00:00:00');
-    const dayEnd = new Date(date + 'T23:59:59');
+    const { dayStart, dayEnd } = getClinicDayBounds(date);
 
     const [existingAppointments, timeBlocksForDay] = await Promise.all([
       this.prisma.appointment.findMany({
@@ -195,8 +199,7 @@ export class BookingService {
     // Map: doctorId → Set of busy "HH:mm"
     const busyMap = new Map<string, Set<string>>();
     for (const apt of existingAppointments) {
-      const start = new Date(apt.start_time);
-      const time = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`;
+      const time = getClinicTimeKey(new Date(apt.start_time));
       if (!busyMap.has(apt.doctor_id)) {
         busyMap.set(apt.doctor_id, new Set());
       }
@@ -207,7 +210,7 @@ export class BookingService {
     for (let h = BUSINESS_START_HOUR; h < BUSINESS_END_HOUR; h++) {
       for (let m = 0; m < 60; m += SLOT_DURATION_MINUTES) {
         const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        const slotStart = new Date(`${date}T${time}:00`);
+        const slotStart = getClinicUtcDateTime(date, time);
         const slotEnd = new Date(
           slotStart.getTime() + SLOT_DURATION_MINUTES * 60_000,
         );
@@ -250,11 +253,11 @@ export class BookingService {
     date: string,
     slots: { time: string; available: boolean; doctor_id: string | null }[],
   ) {
-    const nowCR = toZonedTime(new Date(), CLINIC_TZ);
-    const todayCR = `${nowCR.getFullYear()}-${String(nowCR.getMonth() + 1).padStart(2, '0')}-${String(nowCR.getDate()).padStart(2, '0')}`;
+    const nowCR = getClinicNow();
+    const todayCR = getClinicDateKey(nowCR);
     if (date !== todayCR) return slots;
 
-    const currentMinutes = nowCR.getHours() * 60 + nowCR.getMinutes();
+    const currentMinutes = getClinicMinutes(nowCR);
     return slots.map((s) => {
       const [h, m] = s.time.split(':').map(Number);
       return h * 60 + m <= currentMinutes
@@ -282,8 +285,7 @@ export class BookingService {
       throw new NotFoundException('Doctor not found in this clinic');
     }
 
-    const dayStart = new Date(date + 'T00:00:00');
-    const dayEnd = new Date(date + 'T23:59:59');
+    const { dayStart, dayEnd } = getClinicDayBounds(date);
 
     const [existingAppointments, timeBlocksForDay] = await Promise.all([
       this.prisma.appointment.findMany({
@@ -310,10 +312,7 @@ export class BookingService {
 
     const busySlots = new Set<string>();
     for (const apt of existingAppointments) {
-      const start = new Date(apt.start_time);
-      busySlots.add(
-        `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
-      );
+      busySlots.add(getClinicTimeKey(new Date(apt.start_time)));
     }
 
     const slots: { time: string; available: boolean; doctor_id: string | null }[] =
@@ -321,8 +320,7 @@ export class BookingService {
     for (let h = BUSINESS_START_HOUR; h < BUSINESS_END_HOUR; h++) {
       for (let m = 0; m < 60; m += SLOT_DURATION_MINUTES) {
         const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        // Check if any time block overlaps this 30-min slot (using server-local time)
-        const slotStart = new Date(`${date}T${time}:00`);
+        const slotStart = getClinicUtcDateTime(date, time);
         const slotEnd = new Date(
           slotStart.getTime() + SLOT_DURATION_MINUTES * 60_000,
         );
@@ -370,7 +368,7 @@ export class BookingService {
 
     // Parse the incoming date+time as Costa Rica local time, then convert to UTC for storage.
     // e.g. dto.date='2026-03-16', dto.time='08:00' → startTime=2026-03-16T14:00:00.000Z
-    const startTime = fromZonedTime(`${dto.date}T${dto.time}:00`, CLINIC_TZ);
+    const startTime = getClinicUtcDateTime(dto.date, dto.time);
     const endTime = new Date(startTime.getTime() + service.duration_minutes * 60_000);
 
     // Check for overlap

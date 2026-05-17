@@ -10,7 +10,7 @@ export class BookingQueryDto {
   clinic_slug?: string;
 
   @IsOptional()
-  @IsUUID('4')
+  @IsString()
   service_id?: string;
 }
 
@@ -28,7 +28,7 @@ export class AvailableSlotsQueryDto {
   doctor_id?: string;
 
   @IsOptional()
-  @IsUUID('4')
+  @IsString()
   service_id?: string;
 
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
@@ -44,7 +44,8 @@ export class CreateBookingDto {
   @IsString()
   clinic_slug?: string;
 
-  @IsUUID('4')
+  @IsString()
+  @IsNotEmpty()
   service_id: string;
 
   @IsString()

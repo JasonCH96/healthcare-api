@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -53,6 +53,37 @@ export class PatientsService {
   findOne(clinicId: string, id: string) {
     return this.prisma.patient.findFirstOrThrow({
       where: { id, clinic_id: clinicId, deletedAt: null },
+    });
+  }
+
+  async findAppointments(clinicId: string, patientId: string) {
+    const patient = await this.prisma.patient.findFirst({
+      where: { id: patientId, clinic_id: clinicId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (!patient) {
+      throw new NotFoundException('Patient not found');
+    }
+
+    return this.prisma.appointment.findMany({
+      where: {
+        clinic_id: clinicId,
+        patient_id: patientId,
+        deletedAt: null,
+      },
+      include: {
+        patient: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+        doctor: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+        service: {
+          select: { id: true, name: true, duration_minutes: true, price: true },
+        },
+      },
+      orderBy: { start_time: 'desc' },
     });
   }
 

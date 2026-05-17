@@ -6,6 +6,14 @@ import { AuthService } from './auth.service.js';
 import { AuthController } from './auth.controller.js';
 import { JwtStrategy } from './jwt.strategy.js';
 
+function getJwtSecret(config: ConfigService) {
+  const secret = config.get<string>('JWT_SECRET')?.trim();
+  if (!secret) {
+    throw new Error('JWT_SECRET is required');
+  }
+  return secret;
+}
+
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
@@ -13,7 +21,7 @@ import { JwtStrategy } from './jwt.strategy.js';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET')!,
+        secret: getJwtSecret(config),
         signOptions: {
           expiresIn: config.get<string>('JWT_ACCESS_EXPIRATION', '15m') as any,
         },

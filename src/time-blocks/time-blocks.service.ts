@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateTimeBlockDto, TimeBlockQueryDto } from './dto/time-block.dto.js';
+import { getClinicDayBounds } from '../common/utils/clinic-time.util.js';
 
 @Injectable()
 export class TimeBlocksService {
@@ -12,10 +13,10 @@ export class TimeBlocksService {
     if (query.startDate || query.endDate) {
       where.start_time = {};
       if (query.startDate) {
-        where.start_time.gte = new Date(query.startDate + 'T00:00:00');
+        where.start_time.gte = getClinicDayBounds(query.startDate).dayStart;
       }
       if (query.endDate) {
-        where.start_time.lte = new Date(query.endDate + 'T23:59:59');
+        where.start_time.lte = getClinicDayBounds(query.endDate).dayEnd;
       }
     }
 

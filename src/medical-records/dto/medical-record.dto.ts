@@ -51,6 +51,31 @@ export class CreateDentalRecordDto {
   estimated_budget?: number;
 }
 
+export class CreatePrescriptionMedicationDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsString()
+  @IsNotEmpty()
+  dosage: string;
+
+  @IsString()
+  @IsNotEmpty()
+  frequency: string;
+}
+
+export class CreatePrescriptionDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePrescriptionMedicationDto)
+  medications: CreatePrescriptionMedicationDto[];
+
+  @IsOptional()
+  @IsString()
+  additional_notes?: string;
+}
+
 export class CreateMedicalRecordDto {
   @IsUUID('4')
   patient_id: string;
@@ -84,4 +109,9 @@ export class CreateMedicalRecordDto {
   @ValidateNested({ each: true })
   @Type(() => CreateDentalRecordDto)
   dentalRecords?: CreateDentalRecordDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreatePrescriptionDto)
+  prescription?: CreatePrescriptionDto;
 }
