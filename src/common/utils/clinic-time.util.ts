@@ -52,3 +52,19 @@ export function getReminderWindowUtc() {
     ),
   };
 }
+
+export function getClinicMonthStartUtc() {
+  const now = getClinicNow();
+  const monthStartLocal = formatInTimeZone(now, CLINIC_TZ, 'yyyy-MM-01');
+  return fromZonedTime(`${monthStartLocal}T00:00:00`, CLINIC_TZ);
+}
+
+export function getClinicDaysAgoUtc(days: number) {
+  const now = getClinicNow();
+  const target = new Date(now);
+  target.setDate(target.getDate() - days);
+  return fromZonedTime(
+    formatInTimeZone(target, CLINIC_TZ, "yyyy-MM-dd'T'HH:mm:ss"),
+    CLINIC_TZ,
+  );
+}

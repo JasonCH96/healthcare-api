@@ -27,7 +27,8 @@ export class AppointmentsService {
     if (query.date) {
       // Treat the date as a full day in Costa Rica time and convert to UTC boundaries.
       // e.g. 2026-03-16 CR → gte: 2026-03-16T06:00:00Z, lte: 2026-03-17T05:59:59.999Z
-      where.start_time = getClinicDayBounds(query.date);
+      const { dayStart, dayEnd } = getClinicDayBounds(query.date);
+      where.start_time = { gte: dayStart, lte: dayEnd };
     } else if (query.startDate || query.endDate) {
       where.start_time = {};
       if (query.startDate) {

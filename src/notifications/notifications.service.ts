@@ -12,6 +12,9 @@ import {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly whatsappWebhookUrl: string | null;
+  private readonly whatsappWebhookAuthHeader: string;
+  private readonly whatsappWebhookToken: string | null;
+  private readonly whatsappRequestTimeoutMs: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -19,10 +22,27 @@ export class NotificationsService {
   ) {
     this.whatsappWebhookUrl =
       this.configService.get<string>('WHATSAPP_WEBHOOK_URL')?.trim() || null;
+    this.whatsappWebhookAuthHeader =
+      this.configService.get<string>('WHATSAPP_WEBHOOK_AUTH_HEADER')?.trim() ||
+      'Authorization';
+    this.whatsappWebhookToken =
+      this.configService.get<string>('WHATSAPP_WEBHOOK_TOKEN')?.trim() || null;
+    this.whatsappRequestTimeoutMs = Number(
+      this.configService.get<string>('WHATSAPP_REQUEST_TIMEOUT_MS')?.trim() ||
+        '10000',
+    );
   }
 
   @Cron(CronExpression.EVERY_HOUR)
   async sendAppointmentReminders() {
+    return this.runAppointmentReminders('cron');
+  }
+
+  async sendAppointmentRemindersNow() {
+    return this.runAppointmentReminders('manual');
+  }
+
+  private async runAppointmentReminders(trigger: 'cron' | 'manual') {
     const { start, end } = getReminderWindowUtc();
 
     const appointments = await this.prisma.appointment.findMany({
@@ -50,59 +70,151 @@ export class NotificationsService {
     });
 
     if (appointments.length === 0) {
-      return;
+      return {
+        trigger,
+        scanned: 0,
+        sent: 0,
+        failed: 0,
+        skipped: 0,
+        reminder_window_start: start.toISOString(),
+        reminder_window_end: end.toISOString(),
+      };
     }
 
-    this.logger.log(`Found ${appointments.length} appointments to remind`);
+    this.logger.log(
+      `Found ${appointments.length} appointments to remind via ${trigger}`,
+    );
 
-    const appointmentIds = appointments.map((a) => a.id);
+    const sentAppointmentIds: string[] = [];
+    let skipped = 0;
+    let failed = 0;
 
     for (const appointment of appointments) {
       const patient = appointment.patient;
       const doctor = appointment.doctor;
+      const normalizedPhone = this.normalizeWhatsappPhone(
+        patient.whatsapp_phone,
+      );
       const formattedTime = new Intl.DateTimeFormat('es-CR', {
         dateStyle: 'short',
         timeStyle: 'short',
         timeZone: CLINIC_TZ,
       }).format(new Date(appointment.start_time));
+
       const payload = {
+        appointment_id: appointment.id,
+        clinic_id: appointment.clinic_id,
         clinic_name: appointment.clinic.name,
         patient_name: `${patient.first_name} ${patient.last_name}`,
-        patient_phone: patient.whatsapp_phone,
+        patient_phone: normalizedPhone,
         doctor_name: `${doctor.first_name} ${doctor.last_name}`,
         appointment_time: formattedTime,
+        reminder_window_start: start.toISOString(),
+        reminder_window_end: end.toISOString(),
       };
 
-      if (this.whatsappWebhookUrl && patient.whatsapp_phone) {
-        try {
-          await axios.post(this.whatsappWebhookUrl, payload, {
-            headers: { 'Content-Type': 'application/json' },
-          });
-        } catch (error) {
-          this.logger.error(
-            `Failed to send WhatsApp reminder for appointment ${appointment.id}: ${
-              error instanceof Error ? error.message : 'unknown error'
-            }`,
-          );
-          continue;
+      if (!normalizedPhone) {
+        skipped += 1;
+        this.logger.warn(
+          `[WhatsApp] Reminder skipped for appointment ${appointment.id}: patient has no valid phone`,
+        );
+        continue;
+      }
+
+      if (!this.whatsappWebhookUrl) {
+        skipped += 1;
+        this.logger.warn(
+          `[WhatsApp] Reminder skipped for appointment ${appointment.id}: WHATSAPP_WEBHOOK_URL is not configured`,
+        );
+        continue;
+      }
+
+      try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+
+        if (this.whatsappWebhookToken) {
+          headers[this.whatsappWebhookAuthHeader] =
+            this.whatsappWebhookToken.startsWith('Bearer ')
+              ? this.whatsappWebhookToken
+              : `Bearer ${this.whatsappWebhookToken}`;
         }
-      } else {
-        this.logger.log(
-          `[WhatsApp] Reminder queued for ${payload.patient_name} (${payload.patient_phone ?? 'sin teléfono'}) - ${payload.appointment_time} en ${payload.clinic_name}`,
+
+        await axios.post(this.whatsappWebhookUrl, payload, {
+          headers,
+          timeout: this.whatsappRequestTimeoutMs,
+        });
+        sentAppointmentIds.push(appointment.id);
+      } catch (error) {
+        failed += 1;
+        const errorMessage =
+          axios.isAxiosError(error) && error.response
+            ? `status ${error.response.status} - ${JSON.stringify(
+                error.response.data ?? {},
+              )}`
+            : error instanceof Error
+              ? error.message
+              : 'unknown error';
+
+        this.logger.error(
+          `Failed to send WhatsApp reminder for appointment ${appointment.id}: ${errorMessage}`,
         );
       }
     }
 
-    // Update all in a transaction
-    await this.prisma.$transaction(
-      appointmentIds.map((id) =>
-        this.prisma.appointment.update({
-          where: { id },
-          data: { reminder_sent: true },
-        }),
-      ),
+    if (sentAppointmentIds.length > 0) {
+      await this.prisma.$transaction(
+        sentAppointmentIds.map((id) =>
+          this.prisma.appointment.update({
+            where: { id },
+            data: { reminder_sent: true },
+          }),
+        ),
+      );
+    }
+
+    this.logger.log(
+      `Reminder run completed via ${trigger}: sent=${sentAppointmentIds.length}, failed=${failed}, skipped=${skipped}`,
     );
 
-    this.logger.log(`Marked ${appointmentIds.length} appointments as reminded`);
+    return {
+      trigger,
+      scanned: appointments.length,
+      sent: sentAppointmentIds.length,
+      failed,
+      skipped,
+      reminder_window_start: start.toISOString(),
+      reminder_window_end: end.toISOString(),
+    };
+  }
+
+  private normalizeWhatsappPhone(phone: string | null | undefined) {
+    if (!phone) {
+      return null;
+    }
+
+    const digits = phone.replace(/\D/g, '');
+    if (!digits) {
+      return null;
+    }
+
+    if (digits.startsWith('506') && digits.length === 11) {
+      return `+${digits}`;
+    }
+
+    if (digits.length === 8) {
+      return `+506${digits}`;
+    }
+
+    if (digits.startsWith('00') && digits.length > 2) {
+      return `+${digits.slice(2)}`;
+    }
+
+    if (digits.length >= 9) {
+      return `+${digits}`;
+    }
+
+    return null;
   }
 }

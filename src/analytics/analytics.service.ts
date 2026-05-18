@@ -1,21 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  getClinicDateKey,
+  getClinicDayBounds,
+  getClinicDaysAgoUtc,
+  getClinicMonthStartUtc,
+} from '../common/utils/clinic-time.util.js';
 
 @Injectable()
 export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getKpis(clinicId: string) {
-    const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1);
-
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const { dayStart: todayStart, dayEnd } = getClinicDayBounds(getClinicDateKey(new Date()));
+    const todayEnd = new Date(dayEnd.getTime() + 1);
+    const monthStart = getClinicMonthStartUtc();
 
     const [appointmentsToday, newPatientsThisMonth, revenueThisMonth] =
       await Promise.all([
@@ -51,8 +50,7 @@ export class AnalyticsService {
   }
 
   async getRevenue(clinicId: string) {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgo = getClinicDaysAgoUtc(30);
 
     const invoices = await this.prisma.invoice.findMany({
       where: {
@@ -70,7 +68,7 @@ export class AnalyticsService {
     // Group by day
     const revenueByDay = new Map<string, number>();
     for (const inv of invoices) {
-      const day = inv.createdAt.toISOString().split('T')[0];
+      const day = getClinicDateKey(inv.createdAt);
       const current = revenueByDay.get(day) ?? 0;
       revenueByDay.set(day, current + Number(inv.total_amount));
     }

@@ -16,6 +16,8 @@ describe('UsersController', () => {
           useValue: {
             findAllByClinic: jest.fn(),
             createOrLink: jest.fn(),
+            updateMembership: jest.fn(),
+            removeMembership: jest.fn(),
           },
         },
       ],

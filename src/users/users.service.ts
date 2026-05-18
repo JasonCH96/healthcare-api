@@ -3,6 +3,7 @@ import {
   ConflictException,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
@@ -21,7 +22,7 @@ export class UsersService {
 
   async findAllByClinic(clinicId: string) {
     const memberships = await this.prisma.clinicMembership.findMany({
-      where: { clinic_id: clinicId, deletedAt: null },
+      where: { clinic_id: clinicId },
       include: {
         user: {
           select: {
@@ -41,6 +42,7 @@ export class UsersService {
       specialty: m.specialty,
       membership_id: m.id,
       is_active: m.is_active,
+      deleted_at: m.deletedAt,
     }));
   }
 
@@ -236,6 +238,67 @@ export class UsersService {
     };
   }
 
+  async removeMembership(
+    clinicId: string,
+    membershipId: string,
+    actorUserId: string,
+  ) {
+    const membership = await this.prisma.clinicMembership.findFirst({
+      where: {
+        id: membershipId,
+        clinic_id: clinicId,
+        deletedAt: null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new NotFoundException('User membership not found');
+    }
+
+    if (membership.user_id === actorUserId) {
+      throw new ForbiddenException(
+        'You cannot remove your own active membership from this clinic',
+      );
+    }
+
+    const removed = await this.prisma.clinicMembership.update({
+      where: { id: membershipId },
+      data: {
+        is_active: false,
+        deletedAt: new Date(),
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    return {
+      ...this.serializeMembership(removed),
+      is_active: removed.is_active,
+    };
+  }
+
   private serializeMembership(
     membership: Awaited<ReturnType<PrismaService['clinicMembership']['create']>> & {
       user: {
@@ -259,6 +322,7 @@ export class UsersService {
       specialty: membership.specialty,
       membership_id: membership.id,
       is_active: membership.is_active,
+      deleted_at: membership.deletedAt,
     };
   }
 

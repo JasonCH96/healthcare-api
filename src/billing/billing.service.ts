@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -59,9 +60,11 @@ export class BillingService {
       .then(async (patient) => {
         if (!patient) throw new NotFoundException('Patient not found');
         await this.assertAppointment(clinicId, data.patient_id, data.appointment_id);
+        await this.assertNoDuplicateInvoice(clinicId, data.appointment_id);
 
         const paymentStatus = data.payment_status ?? 'UNPAID';
         const paidAmount = this.normalizePaidAmount(paymentStatus, data.total_amount, data.paid_amount);
+        const paidAt = this.resolvePaidAt(paymentStatus, data.paid_at);
 
         return this.prisma.invoice.create({
           data: {
@@ -74,7 +77,7 @@ export class BillingService {
             payment_method: data.payment_method,
             payment_reference: data.payment_reference,
             paid_amount: paidAmount,
-            paid_at: data.paid_at ? new Date(data.paid_at) : this.defaultPaidAt(paymentStatus),
+            paid_at: paidAt,
             notes: data.notes,
             hacienda_status: 'DRAFT',
           },
@@ -113,6 +116,9 @@ export class BillingService {
       invoice.patient_id,
       data.appointment_id ?? invoice.appointment_id ?? undefined,
     );
+    if (data.appointment_id && data.appointment_id !== invoice.appointment_id) {
+      await this.assertNoDuplicateInvoice(clinicId, data.appointment_id, id);
+    }
 
     const nextTotalAmount = data.total_amount ?? Number(invoice.total_amount);
     const nextPaymentStatus = data.payment_status ?? invoice.payment_status;
@@ -120,6 +126,11 @@ export class BillingService {
       nextPaymentStatus,
       nextTotalAmount,
       data.paid_amount ?? Number(invoice.paid_amount ?? 0),
+    );
+    const nextPaidAt = this.resolvePaidAt(
+      nextPaymentStatus,
+      data.paid_at,
+      invoice.paid_at,
     );
 
     return this.prisma.invoice.update({
@@ -146,8 +157,8 @@ export class BillingService {
         ...(nextPaidAmount !== undefined && {
           paid_amount: nextPaidAmount,
         }),
-        ...(data.paid_at !== undefined && {
-          paid_at: data.paid_at ? new Date(data.paid_at) : null,
+        ...(nextPaidAt !== undefined && {
+          paid_at: nextPaidAt,
         }),
         ...(data.notes !== undefined && {
           notes: data.notes,
@@ -188,6 +199,30 @@ export class BillingService {
     }
   }
 
+  private async assertNoDuplicateInvoice(
+    clinicId: string,
+    appointmentId?: string,
+    excludeInvoiceId?: string,
+  ) {
+    if (!appointmentId) return;
+
+    const existing = await this.prisma.invoice.findFirst({
+      where: {
+        clinic_id: clinicId,
+        appointment_id: appointmentId,
+        deletedAt: null,
+        ...(excludeInvoiceId ? { id: { not: excludeInvoiceId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw new ConflictException(
+        'An active internal receipt already exists for this appointment',
+      );
+    }
+  }
+
   private normalizePaidAmount(
     status: PaymentStatus,
     totalAmount: number,
@@ -210,7 +245,19 @@ export class BillingService {
     return new Prisma.Decimal(paidAmount);
   }
 
-  private defaultPaidAt(status: PaymentStatus) {
-    return status === 'UNPAID' ? null : new Date();
+  private resolvePaidAt(
+    status: PaymentStatus,
+    paidAt?: string,
+    currentPaidAt?: Date | null,
+  ) {
+    if (status === 'UNPAID') {
+      return null;
+    }
+
+    if (paidAt !== undefined) {
+      return paidAt ? new Date(paidAt) : null;
+    }
+
+    return currentPaidAt ?? new Date();
   }
 }
