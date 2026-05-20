@@ -1,8 +1,7 @@
-import { addHours } from 'date-fns';
+import { addHours, subDays } from 'date-fns';
 import {
   formatInTimeZone,
   fromZonedTime,
-  toZonedTime,
 } from 'date-fns-tz';
 
 export const CLINIC_TZ = 'America/Costa_Rica';
@@ -22,8 +21,8 @@ export function getClinicDayBounds(date: string) {
   };
 }
 
-export function getClinicNow() {
-  return toZonedTime(new Date(), CLINIC_TZ);
+export function getClinicNow(now = new Date()) {
+  return now;
 }
 
 export function getClinicMinutes(date: Date) {
@@ -37,34 +36,23 @@ export function getClinicUtcDateTime(date: string, time: string) {
 }
 
 export function getReminderWindowUtc() {
-  const now = getClinicNow();
+  const now = new Date();
   const windowStartLocal = addHours(now, 24);
   const windowEndLocal = addHours(now, 25);
 
   return {
-    start: fromZonedTime(
-      formatInTimeZone(windowStartLocal, CLINIC_TZ, "yyyy-MM-dd'T'HH:mm:ss"),
-      CLINIC_TZ,
-    ),
-    end: fromZonedTime(
-      formatInTimeZone(windowEndLocal, CLINIC_TZ, "yyyy-MM-dd'T'HH:mm:ss"),
-      CLINIC_TZ,
-    ),
+    start: windowStartLocal,
+    end: windowEndLocal,
   };
 }
 
 export function getClinicMonthStartUtc() {
-  const now = getClinicNow();
-  const monthStartLocal = formatInTimeZone(now, CLINIC_TZ, 'yyyy-MM-01');
+  const monthStartLocal = formatInTimeZone(new Date(), CLINIC_TZ, 'yyyy-MM-01');
   return fromZonedTime(`${monthStartLocal}T00:00:00`, CLINIC_TZ);
 }
 
 export function getClinicDaysAgoUtc(days: number) {
-  const now = getClinicNow();
-  const target = new Date(now);
-  target.setDate(target.getDate() - days);
-  return fromZonedTime(
-    formatInTimeZone(target, CLINIC_TZ, "yyyy-MM-dd'T'HH:mm:ss"),
-    CLINIC_TZ,
-  );
+  const target = subDays(new Date(), days);
+  const targetLocal = formatInTimeZone(target, CLINIC_TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  return fromZonedTime(targetLocal, CLINIC_TZ);
 }

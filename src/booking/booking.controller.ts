@@ -14,7 +14,11 @@ export class BookingController {
 
   @Get('services')
   getServices(@Query() query: BookingQueryDto) {
-    return this.bookingService.getServices(query.clinic_id, query.clinic_slug);
+    return this.bookingService.getServices(
+      query.clinic_id,
+      query.clinic_slug,
+      query.doctor_id,
+    );
   }
 
   @Get('doctors')

@@ -15,6 +15,8 @@ const prisma = new PrismaClient({ adapter });
 
 const ROUNDS = Number(process.env.BCRYPT_ROUNDS ?? 12);
 const DEFAULT_PASSWORD = process.env.MOCK_USER_PASSWORD ?? 'Password123';
+const PATIENT_PORTAL_PASSWORD =
+  process.env.MOCK_PATIENT_PASSWORD ?? 'Paciente123';
 
 const clinicSeeds = [
   {
@@ -507,6 +509,7 @@ async function main() {
     string,
     Awaited<ReturnType<typeof prisma.patient.upsert>>
   >();
+  const patientPassword = await bcrypt.hash(PATIENT_PORTAL_PASSWORD, ROUNDS);
   for (const seed of patientSeeds) {
     const clinic = clinics.get(seed.clinic)!;
     const patient = await prisma.patient.upsert({
@@ -522,6 +525,7 @@ async function main() {
         birth_date: new Date(seed.birth_date),
         gender: seed.gender,
         whatsapp_phone: seed.whatsapp_phone,
+        password: patientPassword,
         emergency_contact: {
           name: 'Emergency Contact',
           phone: seed.whatsapp_phone,
@@ -536,6 +540,7 @@ async function main() {
         birth_date: new Date(seed.birth_date),
         gender: seed.gender,
         whatsapp_phone: seed.whatsapp_phone,
+        password: patientPassword,
         emergency_contact: {
           name: 'Emergency Contact',
           phone: seed.whatsapp_phone,

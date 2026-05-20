@@ -1,6 +1,8 @@
 import {
   getClinicDateKey,
+  getClinicDaysAgoUtc,
   getClinicDayBounds,
+  getClinicMonthStartUtc,
   getClinicUtcDateTime,
   getReminderWindowUtc,
 } from './clinic-time.util.js';
@@ -40,5 +42,18 @@ describe('clinic-time util', () => {
 
     expect(start.toISOString()).toBe('2026-05-18T15:10:00.000Z');
     expect(end.toISOString()).toBe('2026-05-18T16:10:00.000Z');
+  });
+
+  it('uses Costa Rica month boundaries even when UTC is still the previous month locally', () => {
+    jest.setSystemTime(new Date('2026-06-01T05:30:00.000Z'));
+
+    expect(getClinicDateKey(new Date())).toBe('2026-05-31');
+    expect(getClinicMonthStartUtc().toISOString()).toBe('2026-05-01T06:00:00.000Z');
+  });
+
+  it('subtracts clinic days from the Costa Rica local date/time', () => {
+    jest.setSystemTime(new Date('2026-06-01T05:30:00.000Z'));
+
+    expect(getClinicDaysAgoUtc(1).toISOString()).toBe('2026-05-31T05:30:00.000Z');
   });
 });

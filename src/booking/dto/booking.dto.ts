@@ -12,6 +12,10 @@ export class BookingQueryDto {
   @IsOptional()
   @IsString()
   service_id?: string;
+
+  @IsOptional()
+  @IsString()
+  doctor_id?: string;
 }
 
 export class AvailableSlotsQueryDto {
@@ -72,5 +76,8 @@ export class CreateBookingDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^\d{8}$/, {
+    message: 'whatsapp_phone must contain exactly 8 digits',
+  })
   whatsapp_phone?: string;
 }

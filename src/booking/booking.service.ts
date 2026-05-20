@@ -1,34 +1,44 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateBookingDto } from './dto/booking.dto.js';
 import {
-  CLINIC_TZ,
   getClinicDateKey,
   getClinicDayBounds,
   getClinicMinutes,
   getClinicNow,
-  getClinicTimeKey,
   getClinicUtcDateTime,
 } from '../common/utils/clinic-time.util.js';
 
-/** Business hours: 08:00–17:00, 30-minute slots */
 const BUSINESS_START_HOUR = 8;
 const BUSINESS_END_HOUR = 17;
 const SLOT_DURATION_MINUTES = 30;
+
+type PublicSlot = {
+  time: string;
+  available: boolean;
+  doctor_id: string | null;
+};
 
 @Injectable()
 export class BookingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getServices(clinicId?: string, clinicSlug?: string) {
+  async getServices(clinicId?: string, clinicSlug?: string, doctorId?: string) {
     const clinic = await this.resolvePublicClinic(clinicId, clinicSlug);
 
     return this.prisma.service.findMany({
-      where: { clinic_id: clinic.id, is_active: true, deletedAt: null },
+      where: {
+        clinic_id: clinic.id,
+        is_active: true,
+        deletedAt: null,
+        ...(doctorId && doctorId !== 'any'
+          ? { doctors: { some: { doctor_id: doctorId } } }
+          : {}),
+      },
       select: {
         id: true,
         name: true,
@@ -43,7 +53,6 @@ export class BookingService {
   async getDoctors(clinicId?: string, clinicSlug?: string, serviceId?: string) {
     const clinic = await this.resolvePublicClinic(clinicId, clinicSlug);
 
-    // If a service_id is provided, only return doctors mapped to that service
     if (serviceId) {
       const service = await this.prisma.service.findFirst({
         where: {
@@ -66,7 +75,6 @@ export class BookingService {
         throw new NotFoundException('Service not found');
       }
 
-      // Get specialties from memberships for the matched doctors
       const doctorIds = service.doctors.map((sd) => sd.doctor.id);
       const memberships = await this.prisma.clinicMembership.findMany({
         where: {
@@ -120,60 +128,31 @@ export class BookingService {
     const clinic = await this.resolvePublicClinic(clinicId, clinicSlug);
     const activeClinicId = clinic.id;
 
-    // Validate the date is not in the past (America/Costa_Rica)
-    const nowCR = getClinicNow();
-    const todayCR = getClinicDateKey(nowCR);
+    const todayCR = getClinicDateKey(getClinicNow());
     if (date < todayCR) {
       throw new BadRequestException('Cannot query slots for a past date');
     }
 
-    const isAny = !doctorId || doctorId === 'any';
+    const durationMinutes = serviceId
+      ? await this.getServiceDuration(activeClinicId, serviceId)
+      : SLOT_DURATION_MINUTES;
 
-    // If a specific doctor was chosen, return slots for that doctor only
-    if (!isAny) {
-      return this.getSlotsForSingleDoctor(activeClinicId, doctorId, date);
+    if (doctorId && doctorId !== 'any') {
+      return this.getSlotsForSingleDoctor(
+        activeClinicId,
+        doctorId,
+        date,
+        durationMinutes,
+        serviceId,
+      );
     }
 
-    // "Any available" — merge slots across all doctors linked to the service
-    let doctorIds: string[] = [];
-
-    if (serviceId) {
-      const service = await this.prisma.service.findFirst({
-        where: {
-          id: serviceId,
-          clinic_id: activeClinicId,
-          is_active: true,
-          deletedAt: null,
-        },
-        include: { doctors: { select: { doctor_id: true } } },
-      });
-
-      if (service && service.doctors.length > 0) {
-        doctorIds = service.doctors.map((sd) => sd.doctor_id);
-      }
-    }
-
-    // Fallback: if no service-linked doctors, use all clinic doctors
-    if (doctorIds.length === 0) {
-      const memberships = await this.prisma.clinicMembership.findMany({
-        where: {
-          clinic_id: activeClinicId,
-          role: 'DOCTOR',
-          is_active: true,
-          deletedAt: null,
-        },
-        select: { user_id: true },
-      });
-      doctorIds = memberships.map((m) => m.user_id);
-    }
-
+    const doctorIds = await this.getServiceDoctorIds(activeClinicId, serviceId);
     if (doctorIds.length === 0) {
       throw new NotFoundException('No doctors available for this service');
     }
 
-    // Build busy-slots per doctor in one query
     const { dayStart, dayEnd } = getClinicDayBounds(date);
-
     const [existingAppointments, timeBlocksForDay] = await Promise.all([
       this.prisma.appointment.findMany({
         where: {
@@ -181,9 +160,10 @@ export class BookingService {
           clinic_id: activeClinicId,
           deletedAt: null,
           status: { not: 'CANCELLED' },
-          start_time: { gte: dayStart, lte: dayEnd },
+          start_time: { lt: dayEnd },
+          end_time: { gt: dayStart },
         },
-        select: { doctor_id: true, start_time: true },
+        select: { doctor_id: true, start_time: true, end_time: true },
       }),
       this.prisma.timeBlock.findMany({
         where: {
@@ -196,150 +176,39 @@ export class BookingService {
       }),
     ]);
 
-    // Map: doctorId → Set of busy "HH:mm"
-    const busyMap = new Map<string, Set<string>>();
-    for (const apt of existingAppointments) {
-      const time = getClinicTimeKey(new Date(apt.start_time));
-      if (!busyMap.has(apt.doctor_id)) {
-        busyMap.set(apt.doctor_id, new Set());
-      }
-      busyMap.get(apt.doctor_id)!.add(time);
-    }
-
-    // Pre-compute which slots each doctor has blocked by time blocks
-    for (let h = BUSINESS_START_HOUR; h < BUSINESS_END_HOUR; h++) {
-      for (let m = 0; m < 60; m += SLOT_DURATION_MINUTES) {
-        const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        const slotStart = getClinicUtcDateTime(date, time);
-        const slotEnd = new Date(
-          slotStart.getTime() + SLOT_DURATION_MINUTES * 60_000,
+    const slots: PublicSlot[] = [];
+    for (const time of this.buildCandidateTimes(durationMinutes)) {
+      const slotStart = getClinicUtcDateTime(date, time);
+      const slotEnd = new Date(slotStart.getTime() + durationMinutes * 60_000);
+      const availableDoctor = doctorIds.find((did) => {
+        const overlapsAppointment = existingAppointments.some(
+          (apt) =>
+            apt.doctor_id === did &&
+            slotStart < new Date(apt.end_time) &&
+            slotEnd > new Date(apt.start_time),
         );
-        for (const block of timeBlocksForDay) {
-          if (
+        const overlapsBlock = timeBlocksForDay.some(
+          (block) =>
+            block.doctor_id === did &&
             slotStart < new Date(block.end_time) &&
-            slotEnd > new Date(block.start_time)
-          ) {
-            if (!busyMap.has(block.doctor_id)) {
-              busyMap.set(block.doctor_id, new Set());
-            }
-            busyMap.get(block.doctor_id)!.add(time);
-          }
-        }
-      }
-    }
-
-    // Merge: for each time slot, find the first available doctor
-    const slots: { time: string; available: boolean; doctor_id: string | null }[] =
-      [];
-    for (let h = BUSINESS_START_HOUR; h < BUSINESS_END_HOUR; h++) {
-      for (let m = 0; m < 60; m += SLOT_DURATION_MINUTES) {
-        const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        const availableDoctor = doctorIds.find(
-          (did) => !busyMap.get(did)?.has(time),
+            slotEnd > new Date(block.start_time),
         );
-        slots.push({
-          time,
-          available: !!availableDoctor,
-          doctor_id: availableDoctor ?? null,
-        });
-      }
+        return !overlapsAppointment && !overlapsBlock;
+      });
+
+      slots.push({
+        time,
+        available: !!availableDoctor,
+        doctor_id: availableDoctor ?? null,
+      });
     }
 
     return { date, doctor_id: 'any', slots: this.filterPastSlots(date, slots) };
   }
 
-  /** Mark slots in the past as unavailable when the date is today (America/Costa_Rica). */
-  private filterPastSlots(
-    date: string,
-    slots: { time: string; available: boolean; doctor_id: string | null }[],
-  ) {
-    const nowCR = getClinicNow();
-    const todayCR = getClinicDateKey(nowCR);
-    if (date !== todayCR) return slots;
-
-    const currentMinutes = getClinicMinutes(nowCR);
-    return slots.map((s) => {
-      const [h, m] = s.time.split(':').map(Number);
-      return h * 60 + m <= currentMinutes
-        ? { ...s, available: false, doctor_id: null }
-        : s;
-    });
-  }
-
-  // Helper: slots for a single specific doctor
-  private async getSlotsForSingleDoctor(
-    clinicId: string,
-    doctorId: string,
-    date: string,
-  ) {
-    const membership = await this.prisma.clinicMembership.findFirst({
-      where: {
-        user_id: doctorId,
-        clinic_id: clinicId,
-        role: 'DOCTOR',
-        is_active: true,
-        deletedAt: null,
-      },
-    });
-    if (!membership) {
-      throw new NotFoundException('Doctor not found in this clinic');
-    }
-
-    const { dayStart, dayEnd } = getClinicDayBounds(date);
-
-    const [existingAppointments, timeBlocksForDay] = await Promise.all([
-      this.prisma.appointment.findMany({
-        where: {
-          doctor_id: doctorId,
-          clinic_id: clinicId,
-          deletedAt: null,
-          status: { not: 'CANCELLED' },
-          start_time: { gte: dayStart, lte: dayEnd },
-        },
-        select: { start_time: true },
-      }),
-      this.prisma.timeBlock.findMany({
-        where: {
-          doctor_id: doctorId,
-          clinic_id: clinicId,
-          // Any block that overlaps with the day
-          start_time: { lt: dayEnd },
-          end_time: { gt: dayStart },
-        },
-        select: { start_time: true, end_time: true },
-      }),
-    ]);
-
-    const busySlots = new Set<string>();
-    for (const apt of existingAppointments) {
-      busySlots.add(getClinicTimeKey(new Date(apt.start_time)));
-    }
-
-    const slots: { time: string; available: boolean; doctor_id: string | null }[] =
-      [];
-    for (let h = BUSINESS_START_HOUR; h < BUSINESS_END_HOUR; h++) {
-      for (let m = 0; m < 60; m += SLOT_DURATION_MINUTES) {
-        const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        const slotStart = getClinicUtcDateTime(date, time);
-        const slotEnd = new Date(
-          slotStart.getTime() + SLOT_DURATION_MINUTES * 60_000,
-        );
-        const blockedByTimeBlock = timeBlocksForDay.some(
-          (b) =>
-            slotStart < new Date(b.end_time) && slotEnd > new Date(b.start_time),
-        );
-        const available = !busySlots.has(time) && !blockedByTimeBlock;
-        slots.push({ time, available, doctor_id: available ? doctorId : null });
-      }
-    }
-
-    return { date, doctor_id: doctorId, slots: this.filterPastSlots(date, slots) };
-  }
-
   async createAppointment(dto: CreateBookingDto) {
     const clinic = await this.resolvePublicClinic(dto.clinic_id, dto.clinic_slug);
 
-    // Validate service
     const service = await this.prisma.service.findFirst({
       where: {
         id: dto.service_id,
@@ -352,7 +221,6 @@ export class BookingService {
       throw new NotFoundException('Service not found');
     }
 
-    // Validate doctor
     const membership = await this.prisma.clinicMembership.findFirst({
       where: {
         user_id: dto.doctor_id,
@@ -365,13 +233,15 @@ export class BookingService {
     if (!membership) {
       throw new NotFoundException('Doctor not found in this clinic');
     }
+    await this.assertDoctorCanProvideService(
+      clinic.id,
+      dto.doctor_id,
+      dto.service_id,
+    );
 
-    // Parse the incoming date+time as Costa Rica local time, then convert to UTC for storage.
-    // e.g. dto.date='2026-03-16', dto.time='08:00' → startTime=2026-03-16T14:00:00.000Z
     const startTime = getClinicUtcDateTime(dto.date, dto.time);
     const endTime = new Date(startTime.getTime() + service.duration_minutes * 60_000);
 
-    // Check for overlap
     const overlap = await this.prisma.appointment.findFirst({
       where: {
         doctor_id: dto.doctor_id,
@@ -385,9 +255,6 @@ export class BookingService {
       throw new BadRequestException('This time slot is no longer available');
     }
 
-    // Upsert patient: create if new, update contact info if returning
-    // Uses the unique index [clinic_id, identification] so soft-deleted records
-    // are also restored (deletedAt → null) when the same patient re-books.
     const patient = await this.prisma.patient.upsert({
       where: {
         clinic_id_identification: {
@@ -400,7 +267,7 @@ export class BookingService {
         first_name: dto.first_name,
         last_name: dto.last_name,
         identification: dto.identification,
-        birth_date: new Date('1990-01-01'), // placeholder; patient can update later
+        birth_date: new Date('1990-01-01'),
         gender: 'OTHER',
         whatsapp_phone: dto.whatsapp_phone ?? null,
       },
@@ -408,12 +275,11 @@ export class BookingService {
         first_name: dto.first_name,
         last_name: dto.last_name,
         whatsapp_phone: dto.whatsapp_phone ?? null,
-        deletedAt: null, // restore if previously soft-deleted
+        deletedAt: null,
       },
     });
 
-    // Create appointment
-    const appointment = await this.prisma.appointment.create({
+    return this.prisma.appointment.create({
       data: {
         clinic_id: clinic.id,
         patient_id: patient.id,
@@ -434,8 +300,173 @@ export class BookingService {
         doctor: { select: { first_name: true, last_name: true } },
       },
     });
+  }
 
-    return appointment;
+  private async getSlotsForSingleDoctor(
+    clinicId: string,
+    doctorId: string,
+    date: string,
+    durationMinutes: number,
+    serviceId?: string,
+  ) {
+    const membership = await this.prisma.clinicMembership.findFirst({
+      where: {
+        user_id: doctorId,
+        clinic_id: clinicId,
+        role: 'DOCTOR',
+        is_active: true,
+        deletedAt: null,
+      },
+    });
+    if (!membership) {
+      throw new NotFoundException('Doctor not found in this clinic');
+    }
+    if (serviceId) {
+      await this.assertDoctorCanProvideService(clinicId, doctorId, serviceId);
+    }
+
+    const { dayStart, dayEnd } = getClinicDayBounds(date);
+    const [existingAppointments, timeBlocksForDay] = await Promise.all([
+      this.prisma.appointment.findMany({
+        where: {
+          doctor_id: doctorId,
+          clinic_id: clinicId,
+          deletedAt: null,
+          status: { not: 'CANCELLED' },
+          start_time: { lt: dayEnd },
+          end_time: { gt: dayStart },
+        },
+        select: { start_time: true, end_time: true },
+      }),
+      this.prisma.timeBlock.findMany({
+        where: {
+          doctor_id: doctorId,
+          clinic_id: clinicId,
+          start_time: { lt: dayEnd },
+          end_time: { gt: dayStart },
+        },
+        select: { start_time: true, end_time: true },
+      }),
+    ]);
+
+    const slots: PublicSlot[] = [];
+    for (const time of this.buildCandidateTimes(durationMinutes)) {
+      const slotStart = getClinicUtcDateTime(date, time);
+      const slotEnd = new Date(slotStart.getTime() + durationMinutes * 60_000);
+      const overlapsAppointment = existingAppointments.some(
+        (apt) =>
+          slotStart < new Date(apt.end_time) &&
+          slotEnd > new Date(apt.start_time),
+      );
+      const overlapsBlock = timeBlocksForDay.some(
+        (block) =>
+          slotStart < new Date(block.end_time) &&
+          slotEnd > new Date(block.start_time),
+      );
+      const available = !overlapsAppointment && !overlapsBlock;
+      slots.push({ time, available, doctor_id: available ? doctorId : null });
+    }
+
+    return { date, doctor_id: doctorId, slots: this.filterPastSlots(date, slots) };
+  }
+
+  private filterPastSlots(date: string, slots: PublicSlot[]) {
+    const todayCR = getClinicDateKey(getClinicNow());
+    if (date !== todayCR) return slots;
+
+    const currentMinutes = getClinicMinutes(getClinicNow());
+    return slots.map((slot) => {
+      const [h, m] = slot.time.split(':').map(Number);
+      return h * 60 + m <= currentMinutes
+        ? { ...slot, available: false, doctor_id: null }
+        : slot;
+    });
+  }
+
+  private async getServiceDuration(clinicId: string, serviceId: string) {
+    const service = await this.prisma.service.findFirst({
+      where: {
+        id: serviceId,
+        clinic_id: clinicId,
+        is_active: true,
+        deletedAt: null,
+      },
+      select: { duration_minutes: true },
+    });
+    if (!service) {
+      throw new NotFoundException('Service not found');
+    }
+    return Math.max(service.duration_minutes, SLOT_DURATION_MINUTES);
+  }
+
+  private buildCandidateTimes(durationMinutes: number) {
+    const times: string[] = [];
+    const startMinutes = BUSINESS_START_HOUR * 60;
+    const endMinutes = BUSINESS_END_HOUR * 60;
+    const step = Math.max(durationMinutes, SLOT_DURATION_MINUTES);
+
+    for (
+      let minutes = startMinutes;
+      minutes + durationMinutes <= endMinutes;
+      minutes += step
+    ) {
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+    }
+
+    return times;
+  }
+
+  private async getServiceDoctorIds(clinicId: string, serviceId?: string) {
+    if (serviceId) {
+      const service = await this.prisma.service.findFirst({
+        where: {
+          id: serviceId,
+          clinic_id: clinicId,
+          is_active: true,
+          deletedAt: null,
+        },
+        include: { doctors: { select: { doctor_id: true } } },
+      });
+      if (!service) {
+        throw new NotFoundException('Service not found');
+      }
+      return service.doctors.map((sd) => sd.doctor_id);
+    }
+
+    const memberships = await this.prisma.clinicMembership.findMany({
+      where: {
+        clinic_id: clinicId,
+        role: 'DOCTOR',
+        is_active: true,
+        deletedAt: null,
+      },
+      select: { user_id: true },
+    });
+    return memberships.map((m) => m.user_id);
+  }
+
+  private async assertDoctorCanProvideService(
+    clinicId: string,
+    doctorId: string,
+    serviceId: string,
+  ) {
+    const serviceDoctor = await this.prisma.serviceDoctor.findFirst({
+      where: {
+        doctor_id: doctorId,
+        service: {
+          id: serviceId,
+          clinic_id: clinicId,
+          is_active: true,
+          deletedAt: null,
+        },
+      },
+    });
+
+    if (!serviceDoctor) {
+      throw new BadRequestException('Doctor is not assigned to this service');
+    }
   }
 
   private async resolvePublicClinic(clinicId?: string, clinicSlug?: string) {
