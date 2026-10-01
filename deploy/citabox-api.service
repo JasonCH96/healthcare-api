@@ -1,0 +1,27 @@
+[Unit]
+Description=CitaBox API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=citabox
+Group=citabox
+WorkingDirectory=/opt/citabox/current
+EnvironmentFile=/etc/citabox/api.env
+Environment=NODE_OPTIONS=--max-old-space-size=256
+ExecStart=/usr/local/bin/node /opt/citabox/current/dist/src/main.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/citabox /var/cache/citabox
+UMask=0077
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,7 @@ async function bootstrap() {
   requiredEnv('JWT_SECRET');
 
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
 
   const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
@@ -39,13 +40,20 @@ async function bootstrap() {
       .setTitle('CitaBox API')
       .setDescription('API REST de CitaBox para gestión clínica multi-tenant')
       .setVersion('1.0')
-      .setContact('Soporte CitaBox', 'https://citabox.app', 'soporte@citabox.app')
+      .setContact(
+        'Soporte CitaBox',
+        'https://citabox.app',
+        'soporte@citabox.app',
+      )
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('api/docs', app, document);
   }
 
-  await app.listen(process.env.PORT ?? 3001);
+  await app.listen(
+    Number(process.env.PORT ?? 3001),
+    process.env.HOST ?? '0.0.0.0',
+  );
 }
 bootstrap();

@@ -1,0 +1,21 @@
+# Dynamic file configuration for the existing shared Traefik gateway.
+# Replace api.your-domain.com with the API domain pointing to 159.223.174.53.
+http:
+  routers:
+    citabox-api:
+      rule: Host(`api.your-domain.com`)
+      entryPoints: [websecure]
+      service: citabox-api
+      middlewares: [citabox-rate-limit]
+      tls:
+        certResolver: letsencrypt
+  services:
+    citabox-api:
+      loadBalancer:
+        servers:
+          - url: http://172.18.0.1:3001
+  middlewares:
+    citabox-rate-limit:
+      rateLimit:
+        average: 30
+        burst: 60

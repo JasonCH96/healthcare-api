@@ -21,6 +21,7 @@ import { TimeBlocksModule } from './time-blocks/time-blocks.module.js';
 import { PublicModule } from './public/public.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { EmailModule } from './email/email.module.js';
+import { HealthController } from './health/health.controller.js';
 
 @Module({
   imports: [
@@ -51,5 +52,6 @@ import { EmailModule } from './email/email.module.js';
       useClass: TenantInterceptor,
     },
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

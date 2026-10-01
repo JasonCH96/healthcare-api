@@ -8,6 +8,10 @@ yarn-error.log*
 # Environment
 .env
 .env.demo
+.env.production
+.env.production.local
+.deploy-secrets/
+release.tar.gz
 
 # Prisma migrations are required to recreate the demo database.
 

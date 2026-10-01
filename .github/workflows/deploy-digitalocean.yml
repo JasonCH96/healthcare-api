@@ -1,0 +1,70 @@
+name: Test and deploy API to DigitalOcean
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: citabox-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+      DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm test -- --runInBand
+      - run: npm run build
+      - name: Package compiled release without credentials
+        run: tar -czf release.tar.gz dist prisma prisma.config.ts package.json package-lock.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-release
+          path: release.tar.gz
+          retention-days: 7
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: production
+    env:
+      DO_HOST: ${{ vars.DO_HOST || '159.223.174.53' }}
+      DO_SSH_USER: ${{ vars.DO_SSH_USER || 'citabox-deploy' }}
+      DO_SSH_PORT: ${{ vars.DO_SSH_PORT || '22' }}
+      API_URL: ${{ vars.API_URL }}
+      RELEASE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: api-release
+      - name: Configure SSH with a pinned server host key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DO_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$SSH_PRIVATE_KEY" && test -n "$SSH_KNOWN_HOSTS" && test -n "$API_URL"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+      - name: Upload and activate the release
+        run: |
+          scp -P "$DO_SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes release.tar.gz "$DO_SSH_USER@$DO_HOST:/opt/citabox/incoming/$RELEASE_ID.tar.gz"
+          ssh -p "$DO_SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$DO_SSH_USER@$DO_HOST" "sudo /usr/local/sbin/citabox-activate $RELEASE_ID"
+      - name: Check public HTTPS endpoint and database
+        run: curl --fail --silent --show-error --retry 10 --retry-delay 3 --retry-all-errors --max-time 10 "${API_URL%/}/health"

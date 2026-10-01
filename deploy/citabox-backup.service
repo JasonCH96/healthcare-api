@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up CitaBox PostgreSQL
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/citabox-backup
+UMask=0077

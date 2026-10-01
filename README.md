@@ -1,5 +1,7 @@
 # CitaBox API
 
+Para el servidor público, consulta [el despliegue en DigitalOcean y sus variables](DEPLOY_DIGITALOCEAN.md).
+
 API de la demo clínica construida con NestJS, Prisma y PostgreSQL. Incluye agenda, pacientes, expediente, recetas, cobros manuales, portal del paciente y solicitudes públicas de cita. La facturación electrónica y las notificaciones automáticas aún no están integradas.
 
 ## Demo local en Windows, sin Docker

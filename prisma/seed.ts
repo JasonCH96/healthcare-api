@@ -14,9 +14,30 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const prisma = new PrismaClient({ adapter });
 
 const ROUNDS = Number(process.env.BCRYPT_ROUNDS ?? 12);
-const DEFAULT_PASSWORD = process.env.MOCK_USER_PASSWORD ?? 'Password123';
-const PATIENT_PORTAL_PASSWORD =
-  process.env.MOCK_PATIENT_PASSWORD ?? 'Paciente123';
+function seedPassword(name: string, localDefault: string) {
+  const configured = process.env[name]?.trim();
+  if (
+    process.env.NODE_ENV === 'production' &&
+    (!configured || configured.length < 12)
+  ) {
+    throw new Error(
+      `${name} must contain at least 12 characters when seeding production`,
+    );
+  }
+  return configured || localDefault;
+}
+const DEFAULT_PASSWORD = seedPassword('MOCK_USER_PASSWORD', 'Password123');
+const PATIENT_PORTAL_PASSWORD = seedPassword(
+  'MOCK_PATIENT_PASSWORD',
+  'Paciente123',
+);
+const SUPER_ADMIN_PASSWORD = seedPassword(
+  'SUPER_ADMIN_PASSWORD',
+  DEFAULT_PASSWORD,
+);
+const DEMO_ADMIN_PASSWORD = seedPassword('DEMO_ADMIN_PASSWORD', 'admin123');
+const DEMO_DOCTOR_PASSWORD = seedPassword('DEMO_DOCTOR_PASSWORD', 'doctor123');
+const DEMO_STAFF_PASSWORD = seedPassword('DEMO_STAFF_PASSWORD', 'staff123');
 
 const clinicSeeds = [
   {
@@ -73,7 +94,7 @@ const userSeeds = [
   {
     key: 'super',
     email: process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@citabox.app',
-    password: process.env.SUPER_ADMIN_PASSWORD ?? DEFAULT_PASSWORD,
+    password: SUPER_ADMIN_PASSWORD,
     first_name: process.env.SUPER_ADMIN_FIRST_NAME ?? 'Super',
     last_name: process.env.SUPER_ADMIN_LAST_NAME ?? 'Admin',
   },
@@ -87,7 +108,7 @@ const userSeeds = [
   {
     key: 'demo-admin',
     email: 'admin@clinica.cr',
-    password: 'admin123',
+    password: DEMO_ADMIN_PASSWORD,
     first_name: 'Andrea',
     last_name: 'Mora',
   },
@@ -122,7 +143,7 @@ const userSeeds = [
   {
     key: 'doctor-carlos',
     email: 'doctor@clinica.cr',
-    password: 'doctor123',
+    password: DEMO_DOCTOR_PASSWORD,
     first_name: 'Carlos',
     last_name: 'Mendez',
   },
@@ -157,7 +178,7 @@ const userSeeds = [
   {
     key: 'staff-demo',
     email: 'staff@clinica.cr',
-    password: 'staff123',
+    password: DEMO_STAFF_PASSWORD,
     first_name: 'Ana',
     last_name: 'Rodriguez',
   },
@@ -728,7 +749,7 @@ async function main() {
   console.log(
     `Seeded ${clinics.size} clinics, ${users.size} users, ${patientSeeds.length} patients.`,
   );
-  console.log(`Default mock user password: ${DEFAULT_PASSWORD}`);
+  console.log('User passwords configured from seed environment variables.');
   console.log(
     `Superadmin: ${process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@citabox.app'}`,
   );
