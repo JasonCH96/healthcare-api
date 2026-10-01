@@ -7,6 +7,10 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "prisma:generate": "prisma generate",
+    "demo:db": "node scripts/demo-db.mjs",
+    "demo:prepare": "npm run prisma:generate && dotenv -e .env.demo -- prisma migrate deploy && dotenv -e .env.demo -- prisma db seed",
+    "demo:api": "dotenv -e .env.demo -- nest start --watch",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -61,6 +65,7 @@
     "@types/supertest": "^6.0.2",
     "dotenv": "^17.3.1",
     "dotenv-cli": "^11.0.0",
+    "embedded-postgres": "^18.4.0-beta.17",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

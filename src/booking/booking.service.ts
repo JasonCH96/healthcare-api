@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { withDoctorScheduleLock } from '../common/utils/doctor-schedule-lock.util.js';
 import { CreateBookingDto } from './dto/booking.dto.js';
 import {
   getClinicDateKey,
@@ -207,7 +208,10 @@ export class BookingService {
   }
 
   async createAppointment(dto: CreateBookingDto) {
-    const clinic = await this.resolvePublicClinic(dto.clinic_id, dto.clinic_slug);
+    const clinic = await this.resolvePublicClinic(
+      dto.clinic_id,
+      dto.clinic_slug,
+    );
 
     const service = await this.prisma.service.findFirst({
       where: {
@@ -239,66 +243,110 @@ export class BookingService {
       dto.service_id,
     );
 
-    const startTime = getClinicUtcDateTime(dto.date, dto.time);
-    const endTime = new Date(startTime.getTime() + service.duration_minutes * 60_000);
-
-    const overlap = await this.prisma.appointment.findFirst({
-      where: {
-        doctor_id: dto.doctor_id,
-        clinic_id: clinic.id,
-        deletedAt: null,
-        status: { not: 'CANCELLED' },
-        OR: [{ start_time: { lt: endTime }, end_time: { gt: startTime } }],
-      },
-    });
-    if (overlap) {
+    const available = await this.getSlotsForSingleDoctor(
+      clinic.id,
+      dto.doctor_id,
+      dto.date,
+      service.duration_minutes,
+      dto.service_id,
+    );
+    if (
+      !available.slots.some((slot) => slot.time === dto.time && slot.available)
+    ) {
       throw new BadRequestException('This time slot is no longer available');
     }
 
-    const patient = await this.prisma.patient.upsert({
-      where: {
-        clinic_id_identification: {
-          clinic_id: clinic.id,
-          identification: dto.identification,
-        },
-      },
-      create: {
-        clinic_id: clinic.id,
-        first_name: dto.first_name,
-        last_name: dto.last_name,
-        identification: dto.identification,
-        birth_date: new Date('1990-01-01'),
-        gender: 'OTHER',
-        whatsapp_phone: dto.whatsapp_phone ?? null,
-      },
-      update: {
-        first_name: dto.first_name,
-        last_name: dto.last_name,
-        whatsapp_phone: dto.whatsapp_phone ?? null,
-        deletedAt: null,
-      },
-    });
+    const startTime = getClinicUtcDateTime(dto.date, dto.time);
+    const endTime = new Date(
+      startTime.getTime() + service.duration_minutes * 60_000,
+    );
 
-    return this.prisma.appointment.create({
-      data: {
-        clinic_id: clinic.id,
-        patient_id: patient.id,
-        doctor_id: dto.doctor_id,
-        service_id: dto.service_id,
-        start_time: startTime,
-        end_time: endTime,
-        status: 'PENDING',
-        reason: service.name,
-      },
-      select: {
-        id: true,
-        status: true,
-        start_time: true,
-        end_time: true,
-        reason: true,
-        service: { select: { name: true } },
-        doctor: { select: { first_name: true, last_name: true } },
-      },
+    return withDoctorScheduleLock(this.prisma, dto.doctor_id, async (tx) => {
+      const [overlap, block] = await Promise.all([
+        tx.appointment.findFirst({
+          where: {
+            doctor_id: dto.doctor_id,
+            clinic_id: clinic.id,
+            deletedAt: null,
+            status: { not: 'CANCELLED' },
+            start_time: { lt: endTime },
+            end_time: { gt: startTime },
+          },
+        }),
+        tx.timeBlock.findFirst({
+          where: {
+            doctor_id: dto.doctor_id,
+            clinic_id: clinic.id,
+            start_time: { lt: endTime },
+            end_time: { gt: startTime },
+          },
+        }),
+      ]);
+      if (overlap || block || startTime <= new Date()) {
+        throw new BadRequestException('This time slot is no longer available');
+      }
+
+      const existingPatient = await tx.patient.findUnique({
+        where: {
+          clinic_id_identification: {
+            clinic_id: clinic.id,
+            identification: dto.identification,
+          },
+        },
+      });
+      if (existingPatient?.deletedAt) {
+        throw new BadRequestException(
+          'Please contact the clinic to book this appointment',
+        );
+      }
+      if (
+        existingPatient &&
+        (existingPatient.first_name.trim().toLocaleLowerCase() !==
+          dto.first_name.trim().toLocaleLowerCase() ||
+          existingPatient.last_name.trim().toLocaleLowerCase() !==
+            dto.last_name.trim().toLocaleLowerCase() ||
+          (existingPatient.whatsapp_phone &&
+            existingPatient.whatsapp_phone.replace(/\D/g, '') !==
+              dto.whatsapp_phone))
+      ) {
+        throw new BadRequestException(
+          'Please contact the clinic to book this appointment',
+        );
+      }
+
+      const patient =
+        existingPatient ??
+        (await tx.patient.create({
+          data: {
+            clinic_id: clinic.id,
+            first_name: dto.first_name.trim(),
+            last_name: dto.last_name.trim(),
+            identification: dto.identification,
+            whatsapp_phone: dto.whatsapp_phone ?? null,
+          },
+        }));
+
+      return tx.appointment.create({
+        data: {
+          clinic_id: clinic.id,
+          patient_id: patient.id,
+          doctor_id: dto.doctor_id,
+          service_id: dto.service_id,
+          start_time: startTime,
+          end_time: endTime,
+          status: 'PENDING',
+          reason: service.name,
+        },
+        select: {
+          id: true,
+          status: true,
+          start_time: true,
+          end_time: true,
+          reason: true,
+          service: { select: { name: true } },
+          doctor: { select: { first_name: true, last_name: true } },
+        },
+      });
     });
   }
 
@@ -367,7 +415,11 @@ export class BookingService {
       slots.push({ time, available, doctor_id: available ? doctorId : null });
     }
 
-    return { date, doctor_id: doctorId, slots: this.filterPastSlots(date, slots) };
+    return {
+      date,
+      doctor_id: doctorId,
+      slots: this.filterPastSlots(date, slots),
+    };
   }
 
   private filterPastSlots(date: string, slots: PublicSlot[]) {
@@ -396,7 +448,7 @@ export class BookingService {
     if (!service) {
       throw new NotFoundException('Service not found');
     }
-    return Math.max(service.duration_minutes, SLOT_DURATION_MINUTES);
+    return service.duration_minutes;
   }
 
   private buildCandidateTimes(durationMinutes: number) {
@@ -487,7 +539,9 @@ export class BookingService {
       throw new NotFoundException('Clinic not found');
     }
     if (!clinic.booking_enabled) {
-      throw new BadRequestException('Online booking is disabled for this clinic');
+      throw new BadRequestException(
+        'Online booking is disabled for this clinic',
+      );
     }
 
     return clinic;

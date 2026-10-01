@@ -127,8 +127,8 @@ model Patient {
   first_name        String
   last_name         String
   identification    String
-  birth_date        DateTime
-  gender            Gender
+  birth_date        DateTime?
+  gender            Gender?
   whatsapp_phone    String?
   emergency_contact Json?
   password          String?

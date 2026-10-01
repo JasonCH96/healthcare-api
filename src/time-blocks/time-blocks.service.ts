@@ -1,23 +1,31 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateTimeBlockDto, TimeBlockQueryDto } from './dto/time-block.dto.js';
 import { getClinicDayBounds } from '../common/utils/clinic-time.util.js';
+import { withDoctorScheduleLock } from '../common/utils/doctor-schedule-lock.util.js';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class TimeBlocksService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(clinicId: string, query: TimeBlockQueryDto) {
-    const where: any = { clinic_id: clinicId };
+    const where: Prisma.TimeBlockWhereInput = { clinic_id: clinicId };
 
     if (query.startDate || query.endDate) {
-      where.start_time = {};
-      if (query.startDate) {
-        where.start_time.gte = getClinicDayBounds(query.startDate).dayStart;
-      }
-      if (query.endDate) {
-        where.start_time.lte = getClinicDayBounds(query.endDate).dayEnd;
-      }
+      where.start_time = {
+        ...(query.startDate
+          ? { gte: getClinicDayBounds(query.startDate).dayStart }
+          : {}),
+        ...(query.endDate
+          ? { lte: getClinicDayBounds(query.endDate).dayEnd }
+          : {}),
+      };
     }
 
     if (query.doctor_id) {
@@ -56,34 +64,44 @@ export class TimeBlocksService {
       throw new BadRequestException('Invalid time block range');
     }
     if (endTime <= startTime) {
-      throw new BadRequestException('Time block end time must be after start time');
+      throw new BadRequestException(
+        'Time block end time must be after start time',
+      );
     }
 
-    const overlap = await this.prisma.timeBlock.findFirst({
-      where: {
+    return withDoctorScheduleLock(this.prisma, dto.doctor_id, async (tx) => {
+      const where = {
         doctor_id: dto.doctor_id,
         clinic_id: clinicId,
         start_time: { lt: endTime },
         end_time: { gt: startTime },
-      },
-    });
-    if (overlap) {
-      throw new ConflictException('Doctor already has a time block in this range');
-    }
+      };
+      const [block, appointment] = await Promise.all([
+        tx.timeBlock.findFirst({ where }),
+        tx.appointment.findFirst({
+          where: { ...where, deletedAt: null, status: { not: 'CANCELLED' } },
+        }),
+      ]);
+      if (block || appointment) {
+        throw new ConflictException(
+          'Doctor already has an appointment or block in this range',
+        );
+      }
 
-    return this.prisma.timeBlock.create({
-      data: {
-        clinic_id: clinicId,
-        doctor_id: dto.doctor_id,
-        start_time: startTime,
-        end_time: endTime,
-        reason: dto.reason,
-      },
-      include: {
-        doctor: {
-          select: { id: true, first_name: true, last_name: true },
+      return tx.timeBlock.create({
+        data: {
+          clinic_id: clinicId,
+          doctor_id: dto.doctor_id,
+          start_time: startTime,
+          end_time: endTime,
+          reason: dto.reason,
         },
-      },
+        include: {
+          doctor: {
+            select: { id: true, first_name: true, last_name: true },
+          },
+        },
+      });
     });
   }
 

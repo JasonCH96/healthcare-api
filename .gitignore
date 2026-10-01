@@ -7,14 +7,13 @@ yarn-error.log*
 
 # Environment
 .env
+.env.demo
 
-# Prisma
-prisma/migrations/*
-!prisma/migrations/20260512000100_add_super_admin_role/
-!prisma/migrations/20260512000100_add_super_admin_role/migration.sql
+# Prisma migrations are required to recreate the demo database.
 
 # Docker
 postgres_data/
+.demo-db/
 
 # OS
 .DS_Store

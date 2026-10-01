@@ -11,15 +11,16 @@ import {
   UpdateAppointmentDto,
   AppointmentQueryDto,
 } from './dto/appointment.dto.js';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, Prisma } from '@prisma/client';
 import { getClinicDayBounds } from '../common/utils/clinic-time.util.js';
+import { withDoctorScheduleLock } from '../common/utils/doctor-schedule-lock.util.js';
 
 @Injectable()
 export class AppointmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(clinicId: string, query: AppointmentQueryDto) {
-    const where: any = {
+    const where: Prisma.AppointmentWhereInput = {
       clinic_id: clinicId,
       deletedAt: null,
     };
@@ -30,13 +31,14 @@ export class AppointmentsService {
       const { dayStart, dayEnd } = getClinicDayBounds(query.date);
       where.start_time = { gte: dayStart, lte: dayEnd };
     } else if (query.startDate || query.endDate) {
-      where.start_time = {};
-      if (query.startDate) {
-        where.start_time.gte = getClinicDayBounds(query.startDate).dayStart;
-      }
-      if (query.endDate) {
-        where.start_time.lte = getClinicDayBounds(query.endDate).dayEnd;
-      }
+      where.start_time = {
+        ...(query.startDate
+          ? { gte: getClinicDayBounds(query.startDate).dayStart }
+          : {}),
+        ...(query.endDate
+          ? { lte: getClinicDayBounds(query.endDate).dayEnd }
+          : {}),
+      };
     }
 
     return this.prisma.appointment.findMany({
@@ -62,41 +64,73 @@ export class AppointmentsService {
 
     this.assertValidTimeRange(startTime, endTime);
     await this.validateCreateRelations(clinicId, dto);
-    await this.assertNoDoctorOverlap(clinicId, dto.doctor_id, startTime, endTime);
-
-    return this.prisma.appointment.create({
-      data: {
-        clinic_id: clinicId,
-        patient_id: dto.patient_id,
-        doctor_id: dto.doctor_id,
-        start_time: startTime,
-        end_time: endTime,
-        reason: dto.reason,
-        service_id: dto.service_id,
-      },
-      include: {
-        patient: {
-          select: { id: true, first_name: true, last_name: true },
+    return withDoctorScheduleLock(this.prisma, dto.doctor_id, async (tx) => {
+      await this.assertScheduleAvailable(
+        tx,
+        clinicId,
+        dto.doctor_id,
+        startTime,
+        endTime,
+      );
+      return tx.appointment.create({
+        data: {
+          clinic_id: clinicId,
+          patient_id: dto.patient_id,
+          doctor_id: dto.doctor_id,
+          start_time: startTime,
+          end_time: endTime,
+          reason: dto.reason,
+          service_id: dto.service_id,
         },
-        doctor: {
-          select: { id: true, first_name: true, last_name: true },
+        include: {
+          patient: {
+            select: { id: true, first_name: true, last_name: true },
+          },
+          doctor: {
+            select: { id: true, first_name: true, last_name: true },
+          },
+          service: {
+            select: {
+              id: true,
+              name: true,
+              duration_minutes: true,
+              price: true,
+            },
+          },
         },
-        service: {
-          select: { id: true, name: true, duration_minutes: true, price: true },
-        },
-      },
+      });
     });
   }
 
-  updateStatus(clinicId: string, id: string, dto: UpdateAppointmentStatusDto) {
-    return this.prisma.appointment
-      .findFirstOrThrow({
-        where: { id, clinic_id: clinicId, deletedAt: null },
-        select: { id: true },
-      })
-      .then(({ id: appointmentId }) =>
-        this.prisma.appointment.update({
-          where: { id: appointmentId },
+  async updateStatus(
+    clinicId: string,
+    id: string,
+    dto: UpdateAppointmentStatusDto,
+  ) {
+    const appointment = await this.prisma.appointment.findFirst({
+      where: { id, clinic_id: clinicId, deletedAt: null },
+    });
+    if (!appointment) throw new NotFoundException('Appointment not found');
+
+    return withDoctorScheduleLock(
+      this.prisma,
+      appointment.doctor_id,
+      async (tx) => {
+        if (
+          appointment.status === AppointmentStatus.CANCELLED &&
+          dto.status !== AppointmentStatus.CANCELLED
+        ) {
+          await this.assertScheduleAvailable(
+            tx,
+            clinicId,
+            appointment.doctor_id,
+            appointment.start_time,
+            appointment.end_time,
+            id,
+          );
+        }
+        return tx.appointment.update({
+          where: { id },
           data: { status: dto.status },
           include: {
             patient: {
@@ -106,11 +140,17 @@ export class AppointmentsService {
               select: { id: true, first_name: true, last_name: true },
             },
             service: {
-              select: { id: true, name: true, duration_minutes: true, price: true },
+              select: {
+                id: true,
+                name: true,
+                duration_minutes: true,
+                price: true,
+              },
             },
           },
-        }),
-      );
+        });
+      },
+    );
   }
 
   async update(clinicId: string, id: string, dto: UpdateAppointmentDto) {
@@ -119,33 +159,50 @@ export class AppointmentsService {
     });
     if (!apt) throw new NotFoundException('Appointment not found');
 
-    const data: Record<string, unknown> = {};
-    if (dto.start_time) data.start_time = new Date(dto.start_time);
-    if (dto.end_time) data.end_time = new Date(dto.end_time);
-    if (dto.reason !== undefined) data.reason = dto.reason;
-    if (dto.status) data.status = dto.status;
+    return withDoctorScheduleLock(this.prisma, apt.doctor_id, async (tx) => {
+      const current = await tx.appointment.findFirst({
+        where: { id, clinic_id: clinicId, deletedAt: null },
+      });
+      if (!current) throw new NotFoundException('Appointment not found');
 
-    if (dto.start_time || dto.end_time) {
-      const startTime = data.start_time instanceof Date ? data.start_time : apt.start_time;
-      const endTime = data.end_time instanceof Date ? data.end_time : apt.end_time;
+      const startTime = dto.start_time
+        ? new Date(dto.start_time)
+        : current.start_time;
+      const endTime = dto.end_time ? new Date(dto.end_time) : current.end_time;
       this.assertValidTimeRange(startTime, endTime);
-      await this.assertNoDoctorOverlap(
-        clinicId,
-        apt.doctor_id,
-        startTime,
-        endTime,
-        id,
-      );
-    }
+      const nextStatus = dto.status ?? current.status;
+      if (nextStatus !== AppointmentStatus.CANCELLED) {
+        await this.assertScheduleAvailable(
+          tx,
+          clinicId,
+          current.doctor_id,
+          startTime,
+          endTime,
+          id,
+        );
+      }
 
-    return this.prisma.appointment.update({
-      where: { id },
-      data,
-      include: {
-        patient: { select: { id: true, first_name: true, last_name: true } },
-        doctor: { select: { id: true, first_name: true, last_name: true } },
-        service: { select: { id: true, name: true, duration_minutes: true, price: true } },
-      },
+      return tx.appointment.update({
+        where: { id },
+        data: {
+          ...(dto.start_time ? { start_time: startTime } : {}),
+          ...(dto.end_time ? { end_time: endTime } : {}),
+          ...(dto.reason !== undefined ? { reason: dto.reason } : {}),
+          ...(dto.status ? { status: dto.status } : {}),
+        },
+        include: {
+          patient: { select: { id: true, first_name: true, last_name: true } },
+          doctor: { select: { id: true, first_name: true, last_name: true } },
+          service: {
+            select: {
+              id: true,
+              name: true,
+              duration_minutes: true,
+              price: true,
+            },
+          },
+        },
+      });
     });
   }
 
@@ -165,7 +222,9 @@ export class AppointmentsService {
       throw new BadRequestException('Invalid appointment time');
     }
     if (endTime <= startTime) {
-      throw new BadRequestException('Appointment end time must be after start time');
+      throw new BadRequestException(
+        'Appointment end time must be after start time',
+      );
     }
   }
 
@@ -202,32 +261,46 @@ export class AppointmentsService {
     ]);
 
     if (!patient) throw new NotFoundException('Patient not found');
-    if (!doctorMembership) throw new NotFoundException('Doctor not found in this clinic');
-    if (dto.service_id && !service) throw new NotFoundException('Service not found');
+    if (!doctorMembership)
+      throw new NotFoundException('Doctor not found in this clinic');
+    if (dto.service_id && !service)
+      throw new NotFoundException('Service not found');
   }
 
-  private async assertNoDoctorOverlap(
+  private async assertScheduleAvailable(
+    tx: Prisma.TransactionClient,
     clinicId: string,
     doctorId: string,
     startTime: Date,
     endTime: Date,
     excludeAppointmentId?: string,
   ) {
-    const overlap = await this.prisma.appointment.findFirst({
-      where: {
-        doctor_id: doctorId,
-        clinic_id: clinicId,
-        deletedAt: null,
-        status: { not: AppointmentStatus.CANCELLED },
-        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
-        OR: [{ start_time: { lt: endTime }, end_time: { gt: startTime } }],
-      },
-    });
+    const [overlap, block] = await Promise.all([
+      tx.appointment.findFirst({
+        where: {
+          doctor_id: doctorId,
+          clinic_id: clinicId,
+          deletedAt: null,
+          status: { not: AppointmentStatus.CANCELLED },
+          ...(excludeAppointmentId
+            ? { id: { not: excludeAppointmentId } }
+            : {}),
+          start_time: { lt: endTime },
+          end_time: { gt: startTime },
+        },
+      }),
+      tx.timeBlock.findFirst({
+        where: {
+          doctor_id: doctorId,
+          clinic_id: clinicId,
+          start_time: { lt: endTime },
+          end_time: { gt: startTime },
+        },
+      }),
+    ]);
 
-    if (overlap) {
-      throw new ConflictException(
-        'The doctor already has an appointment at this time',
-      );
+    if (overlap || block) {
+      throw new ConflictException('The doctor is unavailable at this time');
     }
   }
 }
